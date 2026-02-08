@@ -6,6 +6,7 @@ import { ClerkProvider } from '@clerk/nextjs';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://archive-intel.vercel.app'),
   title: 'Archive Intel - Intelligence Search Platform',
   description: 'Organize investigations, search archives, and uncover digital footprints with Archive Intel',
   openGraph: {
