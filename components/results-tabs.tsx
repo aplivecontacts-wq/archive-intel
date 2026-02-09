@@ -11,7 +11,7 @@ import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, 
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
-import { generateMockSearchQueries, detectInputType } from '@/lib/query-utils';
+import { generateMockSearchQueries, detectInputType, type QueryWithCategory } from '@/lib/query-utils';
 import { groupQueries, CATEGORY_ORDER, CATEGORY_LABELS } from '@/lib/groupQueries';
 import { getObservedEmailInsights } from '@/lib/email-patterns';
 import { OfficialSources } from '@/components/official-sources';
@@ -161,10 +161,10 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
 
   const archiveResults = results.filter((r) => r.source === 'wayback');
   const searchResultsFromApi = results.filter((r) => r.source === 'search');
-  const discoveryQueries =
+  const discoveryQueries: QueryWithCategory[] =
     rawInput && rawInput.trim()
       ? generateMockSearchQueries(rawInput.trim(), detectInputType(rawInput))
-      : searchResultsFromApi;
+      : [];
   const isUrlInput = rawInput && isValidUrl(rawInput);
   const canonicalUrl = isUrlInput ? canonicalizeUrl(rawInput) : null;
 
