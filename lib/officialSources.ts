@@ -6,6 +6,8 @@ export interface OfficialSource {
   fallbackDomainSearchUrl?: (query: string) => string;
   linkOnly?: boolean;
   directUrl?: string;
+  /** Optional: "free" or "paywalled" for court sources */
+  access?: 'free' | 'paywalled';
 }
 
 export interface SourceSubsection {
@@ -77,6 +79,104 @@ export const officialSourceGroups: SourceGroup[] = [
         domain: 'uscourts.gov',
         description: 'Federal judiciary information, opinions, statistics',
         directUrl: 'https://www.uscourts.gov/',
+        linkOnly: true,
+      },
+    ],
+  },
+  {
+    groupName: 'Courts & Corrections (US)',
+    sources: [
+      {
+        name: 'CourtListener — Free (Free Law Project)',
+        domain: 'courtlistener.com',
+        description: 'Free federal court opinions and dockets',
+        directUrl: 'https://www.courtlistener.com/',
+        linkOnly: true,
+        access: 'free',
+      },
+      {
+        name: 'RECAP Archive — Free (Free Law Project)',
+        domain: 'courtlistener.com',
+        description: 'Free PACER document archive',
+        directUrl: 'https://www.courtlistener.com/recap/',
+        linkOnly: true,
+        access: 'free',
+      },
+      {
+        name: 'PACER Case Locator — Paywalled (Official)',
+        domain: 'pcl.uscourts.gov',
+        description: 'Federal case search',
+        directUrl: 'https://pcl.uscourts.gov/',
+        linkOnly: true,
+        access: 'paywalled',
+      },
+      {
+        name: 'PACER — Paywalled (Official)',
+        domain: 'pacer.uscourts.gov',
+        description: 'Federal court records (requires account)',
+        directUrl: 'https://pacer.uscourts.gov/',
+        linkOnly: true,
+        access: 'paywalled',
+      },
+      {
+        name: 'Federal Bureau of Prisons Inmate Locator (Official)',
+        domain: 'bop.gov',
+        description: 'Federal inmate lookup',
+        directUrl: 'https://www.bop.gov/inmateloc/',
+        linkOnly: true,
+      },
+    ],
+  },
+  {
+    groupName: 'International Courts & Records',
+    sources: [
+      {
+        name: 'International Criminal Court (ICC)',
+        domain: 'icc-cpi.int',
+        description: 'International criminal tribunal',
+        directUrl: 'https://www.icc-cpi.int/',
+        linkOnly: true,
+      },
+      {
+        name: 'International Court of Justice (ICJ)',
+        domain: 'icj-cij.org',
+        description: 'UN principal judicial organ',
+        directUrl: 'https://www.icj-cij.org/',
+        linkOnly: true,
+      },
+      {
+        name: 'European Court of Human Rights (ECHR)',
+        domain: 'echr.coe.int',
+        description: 'European human rights court',
+        directUrl: 'https://www.echr.coe.int/',
+        linkOnly: true,
+      },
+      {
+        name: 'World Legal Information Institute (WorldLII)',
+        domain: 'worldlii.org',
+        description: 'Free global legal database',
+        directUrl: 'https://www.worldlii.org/',
+        linkOnly: true,
+      },
+      {
+        name: 'BAILII (UK & Ireland)',
+        domain: 'bailii.org',
+        description: 'British and Irish Legal Information Institute',
+        directUrl: 'https://www.bailii.org/',
+        linkOnly: true,
+      },
+      {
+        name: 'CanLII (Canada)',
+        domain: 'canlii.org',
+        description: 'Canadian Legal Information Institute',
+        directUrl: 'https://www.canlii.org/',
+        linkOnly: true,
+      },
+      {
+        name: 'AustLII (Australia)',
+        domain: 'austlii.edu.au',
+        description: 'Australian Legal Information Institute',
+        directUrl: 'https://www.austlii.edu.au/',
         linkOnly: true,
       },
     ],

@@ -29,9 +29,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const queries = (rawData || []).filter(
+    const rawList = rawData || [];
+    const queries = rawList.filter(
       (row: { user_id?: string | null }) => row.user_id == null || row.user_id === userId
     );
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[api/queries] caseId=%s userId=%s rawCount=%d filteredCount=%d', caseId, userId ?? '(null)', rawList.length, queries.length);
+    }
     return NextResponse.json({ queries });
   } catch (error) {
     return NextResponse.json(

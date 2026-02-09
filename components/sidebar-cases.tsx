@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Plus, FolderOpen, Terminal, Trash2, LogOut } from 'lucide-react';
 import { SignOutButton, SignedIn } from '@clerk/nextjs';
+import { PricingSheet } from '@/components/pricing-sheet';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 
@@ -132,7 +133,8 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
         </SignedIn>
       </div>
 
-      <div className="p-4">
+      <div className="p-4 space-y-2">
+        <PricingSheet />
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-sm shadow-sm">

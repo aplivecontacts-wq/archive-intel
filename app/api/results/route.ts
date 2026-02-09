@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-server';
-import { debugLog } from '@/lib/debug-log';
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,9 +33,6 @@ export async function GET(request: NextRequest) {
       (row: { user_id?: string | null }) =>
         row.user_id == null || row.user_id === userId || (row as any).user_id === undefined
     );
-    // #region agent log
-    debugLog('app/api/results/route.ts', 'GET results returning', { queryId, userId, rawCount: (rawData || []).length, filteredCount: results.length, searchCount: results.filter((r: any) => r.source === 'search').length }, 'H3');
-    // #endregion
     return NextResponse.json({ results });
   } catch (error) {
     return NextResponse.json(

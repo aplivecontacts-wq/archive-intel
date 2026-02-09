@@ -7,7 +7,6 @@ import {
   generateMockSearchQueries,
 } from '@/lib/query-utils';
 import { isValidUrl, isWaybackUrl, parseWaybackUrl, canonicalizeUrl } from '@/lib/url-utils';
-import { debugLog } from '@/lib/debug-log';
 
 async function fetchWaybackData(url: string) {
   try {
@@ -320,26 +319,18 @@ export async function POST(request: NextRequest) {
             captured_at: r.captured_at ?? null,
             snippet: r.snippet ?? null,
             confidence: r.confidence ?? 0.75,
+            category: r.source === 'search' ? (r.category ?? null) : null,
           };
         });
-        // #region agent log
-        debugLog('app/api/search/route.ts', 'About to insert results', { queryId: query.id, rowsCount: rowsToInsert.length, searchCount: rowsToInsert.filter((r: any) => r.source === 'search').length }, 'H2');
-        // #endregion
         console.log('[SEARCH API] Inserting', rowsToInsert.length, 'results into database...');
         const { error: insertError } = await (supabaseServer
           .from('results') as any)
           .insert(rowsToInsert);
 
         if (insertError) {
-          // #region agent log
-          debugLog('app/api/search/route.ts', 'Insert results FAILED', { queryId: query.id, error: insertError?.message }, 'H2');
-          // #endregion
           console.error('[SEARCH API] Failed to insert results:', insertError);
           console.error('[SEARCH API] Insert error details:', JSON.stringify(insertError));
         } else {
-          // #region agent log
-          debugLog('app/api/search/route.ts', 'Insert results SUCCESS', { queryId: query.id, inserted: rowsToInsert.length }, 'H2');
-          // #endregion
           console.log('[SEARCH API] Successfully inserted', allResults.length, 'results');
         }
       } else {
@@ -357,10 +348,18 @@ export async function POST(request: NextRequest) {
       }
     }, 1000);
 
-    // #region agent log
-    debugLog('app/api/search/route.ts', 'POST search returning queryId', { queryId: query.id, caseId, rawInput }, 'H1');
-    // #endregion
-    return NextResponse.json({ queryId: query.id }, { status: 201 });
+    return NextResponse.json({
+      queryId: query.id,
+      query: {
+        id: query.id,
+        case_id: query.case_id,
+        raw_input: query.raw_input,
+        normalized_input: query.normalized_input,
+        input_type: query.input_type,
+        status: query.status,
+        created_at: query.created_at,
+      },
+    }, { status: 201 });
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to create query' },

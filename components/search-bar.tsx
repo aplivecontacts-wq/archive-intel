@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
-import { debugLog } from '@/lib/debug-log';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Search, Globe, User, Quote } from 'lucide-react';
@@ -11,7 +10,7 @@ import { toast } from 'sonner';
 
 interface SearchBarProps {
   caseId: string;
-  onQueryCreated: (newQueryId?: string) => void;
+  onQueryCreated: (newQueryId?: string, rawInput?: string, query?: { id: string; case_id: string; raw_input: string; normalized_input: string; input_type: 'url' | 'username' | 'quote'; status: string; created_at: string }) => void;
 }
 
 export function SearchBar({ caseId, onQueryCreated }: SearchBarProps) {
@@ -40,18 +39,18 @@ export function SearchBar({ caseId, onQueryCreated }: SearchBarProps) {
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to create query');
-
       const data = await response.json();
-      const newQueryId = data.queryId ?? undefined;
-      // #region agent log
-      debugLog('components/search-bar.tsx', 'onQueryCreated called with newQueryId', { newQueryId, rawInput: input.trim() }, 'H1');
-      // #endregion
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to create query');
+      }
+      const newQueryId = data.queryId ?? data.query?.id ?? undefined;
+      const rawInputValue = input.trim();
+      const fullQuery = data.query ?? undefined;
       toast.success('Query created successfully');
       setInput('');
-      onQueryCreated(newQueryId);
+      onQueryCreated(newQueryId, rawInputValue, fullQuery);
     } catch (error) {
-      toast.error('Failed to create query');
+      toast.error(error instanceof Error ? error.message : 'Failed to create query');
     } finally {
       setLoading(false);
     }

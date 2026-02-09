@@ -63,9 +63,21 @@ export function OfficialSources({ rawInput }: OfficialSourcesProps) {
             <div>
               <div className="flex items-start justify-between gap-2 mb-1">
                 <h4 className="text-gray-900 font-semibold text-sm">{source.name}</h4>
-                <Badge variant="outline" className="text-xs font-mono text-emerald-700 border-emerald-300">
-                  .gov
-                </Badge>
+                {source.access === 'free' && (
+                  <Badge variant="outline" className="text-xs font-mono text-emerald-700 border-emerald-300">
+                    Free
+                  </Badge>
+                )}
+                {source.access === 'paywalled' && (
+                  <Badge variant="outline" className="text-xs font-mono text-amber-700 border-amber-300">
+                    Paywalled
+                  </Badge>
+                )}
+                {!source.access && source.domain.endsWith('.gov') && (
+                  <Badge variant="outline" className="text-xs font-mono text-emerald-700 border-emerald-300">
+                    .gov
+                  </Badge>
+                )}
               </div>
               <p className="text-xs text-gray-600 mb-2">{source.description}</p>
               <p className="text-xs text-emerald-600 font-mono">{source.domain}</p>
@@ -161,7 +173,7 @@ export function OfficialSources({ rawInput }: OfficialSourcesProps) {
           <CardContent className="p-4">
             <p className="text-xs text-blue-900 font-semibold mb-1">💡 SEARCHING FOR A STOCK OR COMPANY?</p>
             <p className="text-xs text-gray-700">
-              Tip: Search by official's name in disclosure databases, then review transaction sections for company or ticker information.
+              Tip: Search by official&apos;s name in disclosure databases, then review transaction sections for company or ticker information.
             </p>
           </CardContent>
         </Card>

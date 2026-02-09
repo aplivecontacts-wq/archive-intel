@@ -102,6 +102,29 @@ export interface Database {
           user_id?: string | null
         }
       }
+      user_tiers: {
+        Row: {
+          user_id: string
+          tier: 'free' | 'basic' | 'pro'
+          stripe_customer_id: string | null
+          expires_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          tier?: 'free' | 'basic' | 'pro'
+          stripe_customer_id?: string | null
+          expires_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          tier?: 'free' | 'basic' | 'pro'
+          stripe_customer_id?: string | null
+          expires_at?: string | null
+          updated_at?: string
+        }
+      }
       notes: {
         Row: {
           id: string

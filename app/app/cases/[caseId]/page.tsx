@@ -1,14 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { debugLog } from '@/lib/debug-log';
 import { SidebarCases } from '@/components/sidebar-cases';
 import { SearchBar } from '@/components/search-bar';
 import { QueryList } from '@/components/query-list';
 import { ResultsTabs } from '@/components/results-tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
+import { detectInputType } from '@/lib/query-utils';
 
 interface Case {
   id: string;
@@ -36,18 +35,33 @@ export default function CasePage() {
   const [queries, setQueries] = useState<Query[]>([]);
   const [selectedQueryId, setSelectedQueryId] = useState<string | undefined>();
 
-  useEffect(() => {
-    fetchCases();
-    fetchQueries();
-  }, [caseId]);
-
-  useEffect(() => {
-    const hasRunningQuery = queries.some((q) => q.status === 'running');
-    if (hasRunningQuery) {
-      const interval = setInterval(fetchQueries, 2000);
-      return () => clearInterval(interval);
+  const fetchQueries = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/queries?caseId=${caseId}`);
+      const data = await response.json();
+      if (response.ok) {
+        const list = data.queries || [];
+        setQueries((prev) => {
+          if (list.length === 0 && prev.length > 0) {
+            return prev;
+          }
+          return list;
+        });
+        setSelectedQueryId((prev) => {
+          if (list.length > 0 && !prev) return list[0].id;
+          if (list.length > 0 && prev && !list.some((q: Query) => q.id === prev)) return list[0].id;
+          return prev;
+        });
+        if (process.env.NODE_ENV === 'development' && list.length === 0) {
+          console.warn('[CasePage] Queries fetch returned 0 for caseId=', caseId);
+        }
+      } else {
+        console.error('Failed to fetch queries:', data?.error || response.statusText);
+      }
+    } catch (error) {
+      console.error('Failed to fetch queries:', error);
     }
-  }, [queries]);
+  }, [caseId]);
 
   const fetchCases = async () => {
     try {
@@ -63,26 +77,20 @@ export default function CasePage() {
     }
   };
 
-  const fetchQueries = async () => {
-    try {
-      const response = await fetch(`/api/queries?caseId=${caseId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setQueries(data.queries || []);
+  useEffect(() => {
+    fetchCases();
+    fetchQueries();
+  }, [caseId, fetchQueries]);
 
-        if (data.queries.length > 0 && !selectedQueryId) {
-          setSelectedQueryId(data.queries[0].id);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch queries:', error);
+  useEffect(() => {
+    const hasRunningQuery = queries.some((q) => q.status === 'running');
+    if (hasRunningQuery) {
+      const interval = setInterval(fetchQueries, 2000);
+      return () => clearInterval(interval);
     }
-  };
+  }, [queries, fetchQueries]);
 
   const selectedQuery = queries.find((q) => q.id === selectedQueryId);
-  // #region agent log
-  if (selectedQueryId) debugLog('app/app/cases/[caseId]/page.tsx', 'selectedQueryId state', { selectedQueryId, hasSelectedQuery: !!selectedQuery, queriesLength: queries.length }, 'H1');
-  // #endregion
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -107,9 +115,17 @@ export default function CasePage() {
               <CardContent>
                 <SearchBar
                   caseId={caseId}
-                  onQueryCreated={(newQueryId) => {
+                  onQueryCreated={(newQueryId, rawInput, fullQuery) => {
+                    if (newQueryId) {
+                      const q: Query = fullQuery
+                        ? { id: fullQuery.id, case_id: fullQuery.case_id, raw_input: fullQuery.raw_input, normalized_input: fullQuery.normalized_input, input_type: fullQuery.input_type, status: fullQuery.status as 'running' | 'complete', created_at: fullQuery.created_at }
+                        : rawInput
+                          ? { id: newQueryId, case_id: caseId, raw_input: rawInput, normalized_input: rawInput, input_type: detectInputType(rawInput), status: 'running', created_at: new Date().toISOString() }
+                          : { id: newQueryId, case_id: caseId, raw_input: '', normalized_input: '', input_type: 'quote', status: 'running', created_at: new Date().toISOString() };
+                      setQueries((prev) => [q, ...prev.filter((x) => x.id !== q.id)]);
+                      setSelectedQueryId(newQueryId);
+                    }
                     fetchQueries();
-                    if (newQueryId) setSelectedQueryId(newQueryId);
                   }}
                 />
               </CardContent>

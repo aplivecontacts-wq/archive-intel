@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { debugLog } from '@/lib/debug-log';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -12,7 +11,11 @@ import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, 
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
+import { generateMockSearchQueries, detectInputType } from '@/lib/query-utils';
+import { groupQueries, CATEGORY_ORDER, CATEGORY_LABELS } from '@/lib/groupQueries';
+import { getObservedEmailInsights } from '@/lib/email-patterns';
 import { OfficialSources } from '@/components/official-sources';
+import { ArchiveLookup } from '@/components/archive-lookup';
 
 interface Result {
   id: string;
@@ -24,6 +27,7 @@ interface Result {
   snippet: string | null;
   confidence: number;
   created_at: string;
+  category?: string | null;
 }
 
 interface Note {
@@ -73,7 +77,16 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
   const [showDateJump, setShowDateJump] = useState(false);
   const [jumpDate, setJumpDate] = useState('');
   const [closestCapture, setClosestCapture] = useState<Result | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
+  const toggleGroup = (cat: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
   useEffect(() => {
     setNote(null);
     setNoteContent('');
@@ -88,18 +101,15 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
 
   const fetchResults = async () => {
     try {
-      const response = await fetch(`/api/results?queryId=${queryId}`);
+      const url = `/api/results?queryId=${queryId}`;
+      console.log('[ResultsTabs] fetch URL:', url);
+      const response = await fetch(url);
       const data = response.ok ? await response.json() : null;
+      console.log('[ResultsTabs] raw API response:', data);
       const resultsList = data?.results || [];
-      // #region agent log
-      debugLog('components/results-tabs.tsx', 'fetchResults completed', { queryId, ok: response.ok, count: resultsList.length, searchCount: resultsList.filter((r: Result) => r.source === 'search').length }, 'H3');
-      // #endregion
       setResults(resultsList);
     } catch (error) {
       console.error('Failed to fetch results:', error);
-      // #region agent log
-      debugLog('components/results-tabs.tsx', 'fetchResults FAILED', { queryId, error: String(error) }, 'H3');
-      // #endregion
     } finally {
       setLoading(false);
     }
@@ -150,7 +160,11 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
   };
 
   const archiveResults = results.filter((r) => r.source === 'wayback');
-  const searchResults = results.filter((r) => r.source === 'search');
+  const searchResultsFromApi = results.filter((r) => r.source === 'search');
+  const discoveryQueries =
+    rawInput && rawInput.trim()
+      ? generateMockSearchQueries(rawInput.trim(), detectInputType(rawInput))
+      : searchResultsFromApi;
   const isUrlInput = rawInput && isValidUrl(rawInput);
   const canonicalUrl = isUrlInput ? canonicalizeUrl(rawInput) : null;
 
@@ -246,7 +260,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
         </TabsTrigger>
         <TabsTrigger value="queries" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <Search className="h-4 w-4 mr-2" />
-          QUERIES ({searchResults.length})
+          QUERIES ({discoveryQueries.length})
         </TabsTrigger>
         <TabsTrigger value="notes" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <FileText className="h-4 w-4 mr-2" />
@@ -259,6 +273,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
       </TabsList>
 
       <TabsContent value="archive" className="space-y-3 mt-4">
+        <ArchiveLookup activeTopic={queryId} />
         <Alert className="bg-blue-50 border-blue-200">
           <Info className="h-4 w-4 text-blue-700" />
           <AlertTitle className="text-blue-900 font-mono font-bold text-sm">HOW THE WAYBACK MACHINE WORKS</AlertTitle>
@@ -542,7 +557,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
       </TabsContent>
 
       <TabsContent value="queries" className="space-y-3 mt-4">
-        {searchResults.length === 0 ? (
+        {discoveryQueries.length === 0 ? (
           <Card className="bg-white border-emerald-200 shadow-sm">
             <CardContent className="text-center py-12 text-emerald-600/50 font-mono text-sm">
               NO.SEARCH.QUERIES
@@ -559,101 +574,134 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
               </AlertDescription>
             </Alert>
 
-            {(() => {
-              const groupedResults: Record<string, typeof searchResults> = {};
-              searchResults.forEach((result) => {
-                const category = (result as any).category || 'Other';
-                if (!groupedResults[category]) {
-                  groupedResults[category] = [];
-                }
-                groupedResults[category].push(result);
-              });
+            <div className="space-y-6 pt-2">
+              {(() => {
+                const grouped = groupQueries(discoveryQueries);
+                return CATEGORY_ORDER.map((cat) => {
+                  const items = grouped[cat];
+                if (!items || items.length === 0) return null;
 
-              const categoryOrder = [
-                'Basic Search',
-                'Structural Pages',
-                'File-Based Survivors',
-                'External Mentions',
-                'Time Anchors',
-                'Authority & Oversight',
-                'Other'
-              ];
-
-              return categoryOrder.map((category) => {
-                const categoryResults = groupedResults[category];
-                if (!categoryResults || categoryResults.length === 0) return null;
+                const isExpanded = expandedGroups.has(cat);
+                const itemsToShow = items.length > 4 && !isExpanded ? items.slice(0, 4) : items;
+                const showToggle = items.length > 4;
 
                 return (
-                  <div key={category} className="space-y-2">
-                    <div className="flex items-center gap-2 pt-2">
-                      <div className="h-px flex-1 bg-emerald-200" />
-                      <h3 className="text-emerald-700 font-mono font-bold text-xs uppercase tracking-wide">
-                        {category}
-                      </h3>
-                      <div className="h-px flex-1 bg-emerald-200" />
-                    </div>
+                  <div key={cat} className="space-y-2">
+                    <h3 className="text-emerald-700 font-mono font-bold text-xs uppercase tracking-wide sticky top-0 bg-white/95 py-1">
+                      {CATEGORY_LABELS[cat]}
+                    </h3>
+                    <div className="space-y-2">
+                      {itemsToShow.map((result, idx) => {
+                        const googleSearchUrl = result.snippet
+                          ? `https://www.google.com/search?q=${encodeURIComponent(result.snippet)}`
+                          : null;
 
-                    {categoryResults.map((result) => {
-                      const googleSearchUrl = result.snippet
-                        ? `https://www.google.com/search?q=${encodeURIComponent(result.snippet)}`
-                        : null;
+                        const handleCopyQuery = () => {
+                          if (result.snippet) {
+                            navigator.clipboard.writeText(result.snippet);
+                            toast.success('Query copied to clipboard');
+                          }
+                        };
 
-                      const handleCopyQuery = () => {
-                        if (result.snippet) {
-                          navigator.clipboard.writeText(result.snippet);
-                          toast.success('Query copied to clipboard');
-                        }
-                      };
-
-                      return (
-                        <Card key={result.id} className="bg-white border-emerald-200 hover:border-emerald-300 hover:shadow-md transition-all">
-                          <CardContent className="p-4">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <h3 className="text-gray-900 font-medium font-mono text-sm">{result.title}</h3>
-                                  <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 text-xs border border-emerald-200 font-mono">
-                                    {(result.confidence * 100).toFixed(0)}% SIGNAL
-                                  </Badge>
-                                </div>
-                                {result.snippet && (
-                                  <div className="relative group">
-                                    <code className="block text-sm text-emerald-700 bg-gray-50 p-3 rounded mt-2 font-mono border border-emerald-200 cursor-pointer select-all"
-                                      onClick={handleCopyQuery}
-                                      title="Click to copy"
-                                    >
-                                      {result.snippet}
-                                    </code>
-                                    <Button
-                                      onClick={handleCopyQuery}
-                                      size="sm"
-                                      variant="ghost"
-                                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0"
-                                    >
-                                      <Copy className="h-3 w-3" />
-                                    </Button>
+                        return (
+                          <Card key={`discovery-${cat}-${idx}-${result.title}`} className="bg-white border-emerald-200 hover:border-emerald-300 hover:shadow-md transition-all">
+                            <CardContent className="p-4">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <h3 className="text-gray-900 font-medium font-mono text-sm">{result.title}</h3>
+                                    <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 text-xs border border-emerald-200 font-mono">
+                                      {(result.confidence * 100).toFixed(0)}% SIGNAL
+                                    </Badge>
                                   </div>
+                                  {result.snippet && (
+                                    <div className="relative group">
+                                      <code className="block text-sm text-emerald-700 bg-gray-50 p-3 rounded mt-2 font-mono border border-emerald-200 cursor-pointer select-all"
+                                        onClick={handleCopyQuery}
+                                        title="Click to copy"
+                                      >
+                                        {result.snippet}
+                                      </code>
+                                      <Button
+                                        onClick={handleCopyQuery}
+                                        size="sm"
+                                        variant="ghost"
+                                        className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity h-7 w-7 p-0"
+                                      >
+                                        <Copy className="h-3 w-3" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </div>
+                                {googleSearchUrl && (
+                                  <a
+                                    href={googleSearchUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-emerald-600 hover:text-emerald-700 flex-shrink-0"
+                                    title="Search on Google"
+                                  >
+                                    <ExternalLink className="h-5 w-5" />
+                                  </a>
                                 )}
                               </div>
-                              {googleSearchUrl && (
-                                <a
-                                  href={googleSearchUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-emerald-600 hover:text-emerald-700 flex-shrink-0"
-                                  title="Search on Google"
-                                >
-                                  <ExternalLink className="h-5 w-5" />
-                                </a>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                    {showToggle && (
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(cat)}
+                        className="text-emerald-600 hover:text-emerald-700 text-xs font-mono mt-1"
+                      >
+                        {isExpanded ? 'Show less' : `Show ${items.length - 4} more`}
+                      </button>
+                    )}
                   </div>
                 );
               });
+              })()}
+            </div>
+
+            {(() => {
+              const insights = getObservedEmailInsights(results);
+              if (insights.length === 0) return null;
+
+              return (
+                <Card className="bg-white border-emerald-200 shadow-sm mt-4">
+                  <CardContent className="p-4 space-y-4">
+                    <h3 className="text-emerald-700 font-mono font-bold text-xs uppercase tracking-wide">
+                      Observed Email Patterns
+                    </h3>
+                    {insights.map((insight) => (
+                      <div key={insight.domain} className="space-y-2 text-sm font-mono border-b border-emerald-100 pb-3 last:border-0 last:pb-0">
+                        <p className="font-semibold text-gray-800">{insight.domain}</p>
+                        {insight.roleEmails.length > 0 && (
+                          <p className="text-xs text-gray-600">
+                            Role emails found: {insight.roleEmails.slice(0, 5).join(', ')}
+                          </p>
+                        )}
+                        {insight.namePatternSignals.length > 0 && (
+                          <p className="text-xs text-gray-600">
+                            Name pattern signals:{' '}
+                            {insight.namePatternSignals
+                              .map((s) => `${s.pattern} (${s.confidence}, ${s.count})`)
+                              .join('; ')}
+                          </p>
+                        )}
+                        <p className="text-xs text-gray-500">
+                          Examples: {insight.examples.slice(0, 3).join(', ')}
+                        </p>
+                      </div>
+                    ))}
+                    <p className="text-xs text-gray-500 pt-2 border-t border-emerald-100">
+                      Patterns are inferred from publicly published emails found in results.
+                    </p>
+                  </CardContent>
+                </Card>
+              );
             })()}
           </>
         )}
