@@ -40,6 +40,23 @@ This starts the Next.js dev server on **http://localhost:3000**.
 - App: http://localhost:3000/app — main app (requires sign-in)
 - Login: http://localhost:3000/login — Clerk sign-in
 
+## Database migration (saved_links table)
+
+To create the `saved_links` table for the Saved/Bookmark feature:
+
+1. In **Supabase Dashboard** go to **Project Settings → Database** and copy the **Connection string** (URI, e.g. `postgresql://postgres.[ref]:[YOUR-PASSWORD]@...`).
+2. In your project root, add to **`.env.local`** (use your real password):
+   ```env
+   SUPABASE_DB_URL=postgresql://postgres.[ref]:[YOUR-PASSWORD]@aws-0-[region].pooler.supabase.com:6543/postgres
+   ```
+3. Run:
+   ```bash
+   npm run db:migrate:saved
+   ```
+   You should see: `Migration applied: saved_links table created.`
+
+Alternatively, run the SQL by hand: open **Supabase Dashboard → SQL Editor**, paste the contents of `supabase/migrations/20260210180000_create_saved_links.sql`, and run it.
+
 ## OneDrive / sync folders
 
 This project is in OneDrive. If you see strange errors (e.g. `EINVAL readlink`), the `.next` folder may be corrupted. Run `npm run dev:clean` and restart. Consider excluding `.next` from sync if problems persist.

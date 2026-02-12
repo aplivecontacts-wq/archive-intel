@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -39,18 +39,18 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [queryToDelete, setQueryToDelete] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchAllNotes();
-  }, [queries]);
-
-  const fetchAllNotes = async () => {
+  const fetchAllNotes = useCallback(async () => {
     try {
       const noteChecks = await Promise.all(
         queries.map(async (query) => {
           const response = await fetch(`/api/notes?queryId=${query.id}`);
           if (response.ok) {
             const data = await response.json();
-            return { queryId: query.id, hasNote: data.note && data.note.content.trim().length > 0 };
+            const notes = data.notes || [];
+            return {
+              queryId: query.id,
+              hasNote: notes.some((n: { content?: string }) => (n.content || '').trim().length > 0),
+            };
           }
           return { queryId: query.id, hasNote: false };
         })
@@ -64,7 +64,11 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
     } catch (error) {
       console.error('Failed to fetch notes:', error);
     }
-  };
+  }, [queries]);
+
+  useEffect(() => {
+    fetchAllNotes();
+  }, [fetchAllNotes]);
 
   const handleDeleteClick = (e: React.MouseEvent, queryId: string) => {
     e.stopPropagation();

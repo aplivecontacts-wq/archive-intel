@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * Normalize URL for Wayback lookup:
  * - Require full http/https
@@ -76,6 +78,7 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(archiveUrl.toString(), {
       signal: controller.signal,
+      cache: 'no-store',
     });
 
     clearTimeout(timeout);

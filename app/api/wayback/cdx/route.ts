@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { canonicalizeUrl } from '@/lib/url-utils';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/wayback/cdx
  * Params: url, from (YYYY-MM-DD), to (YYYY-MM-DD)
@@ -39,7 +41,7 @@ export async function GET(request: NextRequest) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
-    const response = await fetch(cdxUrl, { signal: controller.signal });
+    const response = await fetch(cdxUrl, { signal: controller.signal, cache: 'no-store' });
     clearTimeout(timeout);
 
     if (!response.ok) {

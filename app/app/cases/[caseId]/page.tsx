@@ -7,7 +7,10 @@ import { SearchBar } from '@/components/search-bar';
 import { QueryList } from '@/components/query-list';
 import { ResultsTabs } from '@/components/results-tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
 import { detectInputType } from '@/lib/query-utils';
+import { Menu } from 'lucide-react';
 
 interface Case {
   id: string;
@@ -63,7 +66,7 @@ export default function CasePage() {
     }
   }, [caseId]);
 
-  const fetchCases = async () => {
+  const fetchCases = useCallback(async () => {
     try {
       const response = await fetch('/api/cases');
       if (response.ok) {
@@ -75,12 +78,12 @@ export default function CasePage() {
     } catch (error) {
       console.error('Failed to fetch cases:', error);
     }
-  };
+  }, [caseId]);
 
   useEffect(() => {
     fetchCases();
     fetchQueries();
-  }, [caseId, fetchQueries]);
+  }, [caseId, fetchQueries, fetchCases]);
 
   useEffect(() => {
     const hasRunningQuery = queries.some((q) => q.status === 'running');
@@ -94,11 +97,30 @@ export default function CasePage() {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <SidebarCases cases={cases} onCaseCreated={fetchCases} />
+      <div className="hidden lg:block">
+        <SidebarCases cases={cases} onCaseCreated={fetchCases} />
+      </div>
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-auto bg-gradient-to-b from-emerald-50 to-white">
           <div className="container mx-auto p-6 space-y-6">
+            <div className="lg:hidden">
+              <Sheet>
+                <SheetTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-mono"
+                  >
+                    <Menu className="h-4 w-4 mr-2" />
+                    MENU
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="p-0 w-72">
+                  <SidebarCases cases={cases} onCaseCreated={fetchCases} />
+                </SheetContent>
+              </Sheet>
+            </div>
+
             <Card className="bg-white border-emerald-200 shadow-sm">
               <CardHeader>
                 <CardTitle className="text-emerald-700 text-2xl font-mono">
@@ -165,6 +187,7 @@ export default function CasePage() {
                         queryId={selectedQuery.id}
                         queryStatus={selectedQuery.status}
                         rawInput={selectedQuery.raw_input}
+                        caseId={caseId}
                       />
                     </CardContent>
                   </Card>

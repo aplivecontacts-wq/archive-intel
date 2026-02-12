@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ChangeEvent } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon } from 'lucide-react';
+import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon, Bookmark, Paperclip, Upload, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
@@ -38,10 +38,33 @@ interface Note {
   updated_at: string;
 }
 
+interface SavedLinkRow {
+  id: string;
+  user_id: string;
+  source: 'archive' | 'query' | 'official';
+  url: string;
+  title: string | null;
+  snippet: string | null;
+  captured_at: string | null;
+  query_id: string | null;
+  case_id: string | null;
+  created_at: string;
+}
+
+interface NoteAttachment {
+  id: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+  url: string | null;
+}
+
 interface ResultsTabsProps {
   queryId: string;
   queryStatus: 'running' | 'complete';
   rawInput?: string;
+  caseId?: string;
 }
 
 const linkifyText = (text: string) => {
@@ -67,9 +90,9 @@ const linkifyText = (text: string) => {
 };
 
 
-export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps) {
+export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsTabsProps) {
   const [results, setResults] = useState<Result[]>([]);
-  const [note, setNote] = useState<Note | null>(null);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [noteContent, setNoteContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,6 +101,143 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
   const [jumpDate, setJumpDate] = useState('');
   const [closestCapture, setClosestCapture] = useState<Result | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [savedLinks, setSavedLinks] = useState<SavedLinkRow[]>([]);
+  const [attachments, setAttachments] = useState<NoteAttachment[]>([]);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const fetchSaved = useCallback(async () => {
+    try {
+      const res = await fetch('/api/saved');
+      if (res.ok) {
+        const data = await res.json();
+        setSavedLinks(data.saved || []);
+      }
+    } catch {
+      setSavedLinks([]);
+    }
+  }, []);
+
+  // Fetch saved links on mount and when selected query changes so bookmark state is scoped per query.
+  useEffect(() => {
+    fetchSaved();
+  }, [queryId, fetchSaved]);
+
+  // Saved tab and badge: current-query items plus archive items for current case (query_id null, case_id match or legacy null).
+  const scopedSavedLinks = useMemo(
+    () =>
+      savedLinks.filter(
+        (s) =>
+          (s.query_id != null && s.query_id === queryId) ||
+          (s.query_id === null && (s.case_id === caseId || s.case_id == null))
+      ),
+    [savedLinks, queryId, caseId]
+  );
+
+  // Bookmark state is scoped to the CURRENT query only. Legacy rows with query_id null never show in timeline.
+  const isSaved = useCallback(
+    (url: string, source: 'archive' | 'query' | 'official') =>
+      savedLinks.some(
+        (s) =>
+          s.url === url &&
+          s.source === source &&
+          s.query_id != null &&
+          s.query_id === queryId
+      ),
+    [savedLinks, queryId]
+  );
+
+  const toggleSaved = useCallback(
+    async (payload: { source: 'archive' | 'query' | 'official'; url: string; title?: string; snippet?: string; captured_at?: string | null }) => {
+      const { source, url, title, snippet, captured_at } = payload;
+      const saved = isSaved(url, source);
+      try {
+        if (saved) {
+          const params = new URLSearchParams({ url, source, query_id: queryId });
+          const res = await fetch(`/api/saved?${params.toString()}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] save DELETE failed', res.status, errBody);
+            throw new Error('Failed to remove');
+          }
+          toast.success('Removed from saved');
+        } else {
+          const res = await fetch('/api/saved', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source, url, title: title ?? null, snippet: snippet ?? null, captured_at: captured_at ?? null, query_id: queryId }),
+          });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] save POST failed', res.status, errBody);
+            throw new Error('Failed to save');
+          }
+          toast.success('Saved');
+        }
+        await fetchSaved();
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] save error', e.message);
+        toast.error(saved ? 'Failed to remove' : 'Failed to save');
+      }
+    },
+    [isSaved, fetchSaved, queryId]
+  );
+
+  // Archive bookmarks: only show as saved for current query + case (no bleed to other queries).
+  const isArchiveSaved = useCallback(
+    (url: string) =>
+      savedLinks.some(
+        (s) =>
+          s.url === url &&
+          s.source === 'archive' &&
+          (s.query_id === queryId || s.query_id == null) &&
+          (s.case_id === caseId || s.case_id == null)
+      ),
+    [savedLinks, queryId, caseId]
+  );
+
+  const toggleArchiveSave = useCallback(
+    async (url: string, title?: string) => {
+      const saved = isArchiveSaved(url);
+      try {
+        if (saved) {
+          const params = new URLSearchParams({ url, source: 'archive' });
+          if (caseId) params.set('case_id', caseId);
+          const res = await fetch(`/api/saved?${params.toString()}`, { method: 'DELETE' });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] archive DELETE failed', res.status, errBody);
+            throw new Error('Failed to remove');
+          }
+          toast.success('Removed from saved');
+        } else {
+          const res = await fetch('/api/saved', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              source: 'archive',
+              url,
+              title: title ?? null,
+              query_id: queryId,
+              case_id: caseId ?? null,
+            }),
+          });
+          if (!res.ok) {
+            const errBody = await res.json().catch(() => ({}));
+            if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] archive POST failed', res.status, errBody);
+            throw new Error('Failed to save');
+          }
+          toast.success('Saved');
+        }
+        await fetchSaved();
+      } catch (e) {
+        if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] archive save error', e.message);
+        toast.error(saved ? 'Failed to remove' : 'Failed to save');
+      }
+    },
+    [isArchiveSaved, fetchSaved, caseId, queryId]
+  );
 
   const toggleGroup = (cat: string) => {
     setExpandedGroups((prev) => {
@@ -87,19 +247,8 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
       return next;
     });
   };
-  useEffect(() => {
-    setNote(null);
-    setNoteContent('');
-    fetchResults();
-    fetchNote();
 
-    if (queryStatus === 'running') {
-      const interval = setInterval(fetchResults, 2000);
-      return () => clearInterval(interval);
-    }
-  }, [queryId, queryStatus]);
-
-  const fetchResults = async () => {
+  const fetchResults = useCallback(async () => {
     try {
       const url = `/api/results?queryId=${queryId}`;
       console.log('[ResultsTabs] fetch URL:', url);
@@ -113,30 +262,53 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
     } finally {
       setLoading(false);
     }
-  };
+  }, [queryId]);
 
-  const fetchNote = async () => {
+  const fetchAttachments = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/attachments?queryId=${encodeURIComponent(queryId)}`);
+      if (!response.ok) {
+        setAttachments([]);
+        return;
+      }
+      const data = await response.json();
+      setAttachments(data.attachments || []);
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') {
+        console.error('[ResultsTabs] attachments fetch error', error);
+      }
+      setAttachments([]);
+    }
+  }, [queryId]);
+
+  const fetchNotes = useCallback(async () => {
     try {
       const response = await fetch(`/api/notes?queryId=${queryId}`);
       if (response.ok) {
         const data = await response.json();
-        if (data.note) {
-          setNote(data.note);
-          setNoteContent(data.note.content ?? '');
-        } else {
-          setNote(null);
-          setNoteContent('');
-        }
+        setNotes(data.notes || []);
       } else {
-        setNote(null);
-        setNoteContent('');
+        setNotes([]);
       }
     } catch (error) {
-      console.error('Failed to fetch note:', error);
-      setNote(null);
-      setNoteContent('');
+      console.error('Failed to fetch notes:', error);
+      setNotes([]);
     }
-  };
+  }, [queryId]);
+
+  useEffect(() => {
+    setNotes([]);
+    setNoteContent('');
+    setAttachments([]);
+    fetchResults();
+    fetchNotes();
+    fetchAttachments();
+
+    if (queryStatus === 'running') {
+      const interval = setInterval(fetchResults, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [queryId, queryStatus, fetchResults, fetchNotes, fetchAttachments]);
 
   const handleSaveNote = async () => {
     setSaving(true);
@@ -148,15 +320,88 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
       });
 
       if (!response.ok) throw new Error('Failed to save note');
-
-      const data = await response.json();
-      setNote(data.note);
+      setNoteContent('');
+      await fetchNotes();
       toast.success('Note saved successfully');
     } catch (error) {
       toast.error('Failed to save note');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      const response = await fetch(`/api/notes?id=${encodeURIComponent(noteId)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) throw new Error('Failed to delete note');
+      await fetchNotes();
+      toast.success('Note deleted');
+    } catch (error) {
+      toast.error('Failed to delete note');
+    }
+  };
+
+  const handleUploadAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploadingAttachment(true);
+    try {
+      const formData = new FormData();
+      formData.append('queryId', queryId);
+      formData.append('file', file);
+
+      const response = await fetch('/api/attachments', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[ResultsTabs] attachment upload failed', response.status, errBody);
+        }
+        throw new Error('Failed to upload file');
+      }
+
+      toast.success('File added');
+      await fetchAttachments();
+    } catch (error) {
+      toast.error('Failed to add file');
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: string) => {
+    setDeletingAttachmentId(attachmentId);
+    try {
+      const response = await fetch(`/api/attachments?id=${encodeURIComponent(attachmentId)}`, {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        if (process.env.NODE_ENV === 'development') {
+          console.error('[ResultsTabs] attachment delete failed', response.status, errBody);
+        }
+        throw new Error('Failed to delete file');
+      }
+
+      toast.success('File deleted');
+      await fetchAttachments();
+    } catch (error) {
+      toast.error('Failed to delete file');
+    } finally {
+      setDeletingAttachmentId(null);
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   const archiveResults = results.filter((r) => r.source === 'wayback');
@@ -264,16 +509,24 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
         </TabsTrigger>
         <TabsTrigger value="notes" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <FileText className="h-4 w-4 mr-2" />
-          NOTES
+          NOTES ({notes.length})
         </TabsTrigger>
         <TabsTrigger value="official" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <Building2 className="h-4 w-4 mr-2" />
           OFFICIAL SOURCES
         </TabsTrigger>
+        <TabsTrigger value="saved" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <Bookmark className="h-4 w-4 mr-2" />
+          SAVED ({scopedSavedLinks.length})
+        </TabsTrigger>
       </TabsList>
 
       <TabsContent value="archive" className="space-y-3 mt-4">
-        <ArchiveLookup activeTopic={queryId} />
+        <ArchiveLookup
+          activeTopic={queryId}
+          isArchiveSaved={isArchiveSaved}
+          onToggleArchiveSave={toggleArchiveSave}
+        />
         <Alert className="bg-blue-50 border-blue-200">
           <Info className="h-4 w-4 text-blue-700" />
           <AlertTitle className="text-blue-900 font-mono font-bold text-sm">HOW THE WAYBACK MACHINE WORKS</AlertTitle>
@@ -521,16 +774,28 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
                       )}
                     </div>
                     {result.url && (
-                      <div className="flex flex-col gap-2 flex-shrink-0">
-                        <a
-                          href={result.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-emerald-600 hover:text-emerald-700"
-                          title="Open in new tab"
-                        >
-                          <ExternalLink className="h-5 w-5" />
-                        </a>
+                      <div className="flex flex-col gap-2 flex-shrink-0 items-center">
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={result.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-600 hover:text-emerald-700"
+                            title="Open in new tab"
+                          >
+                            <ExternalLink className="h-5 w-5" />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => toggleSaved({ source: 'archive', url: result.url!, title: result.title ?? undefined, snippet: result.snippet ?? undefined, captured_at: result.captured_at })}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-emerald-600"
+                            title={isSaved(result.url, 'archive') ? 'Remove from saved' : 'Save link'}
+                          >
+                            <Bookmark
+                              className={`h-5 w-5 ${isSaved(result.url, 'archive') ? 'fill-emerald-600 text-emerald-600' : ''}`}
+                            />
+                          </button>
+                        </div>
                         {isHighlighted && (
                           <Button
                             size="sm"
@@ -634,15 +899,27 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
                                   )}
                                 </div>
                                 {googleSearchUrl && (
-                                  <a
-                                    href={googleSearchUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-emerald-600 hover:text-emerald-700 flex-shrink-0"
-                                    title="Search on Google"
-                                  >
-                                    <ExternalLink className="h-5 w-5" />
-                                  </a>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <a
+                                      href={googleSearchUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-emerald-600 hover:text-emerald-700"
+                                      title="Search on Google"
+                                    >
+                                      <ExternalLink className="h-5 w-5" />
+                                    </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleSaved({ source: 'query', url: googleSearchUrl, title: result.title ?? undefined, snippet: result.snippet ?? undefined })}
+                                      className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-emerald-600"
+                                      title={isSaved(googleSearchUrl, 'query') ? 'Remove from saved' : 'Save link'}
+                                    >
+                                      <Bookmark
+                                        className={`h-5 w-5 ${isSaved(googleSearchUrl, 'query') ? 'fill-emerald-600 text-emerald-600' : ''}`}
+                                      />
+                                    </button>
+                                  </div>
                                 )}
                               </div>
                             </CardContent>
@@ -711,31 +988,212 @@ export function ResultsTabs({ queryId, queryStatus, rawInput }: ResultsTabsProps
         <Card className="bg-white border-emerald-200 shadow-sm">
           <CardContent className="p-4 space-y-4">
             <Textarea
-              placeholder="Add investigation notes..."
+              placeholder="Write a new note..."
               value={noteContent}
               onChange={(e) => setNoteContent(e.target.value)}
-              className="min-h-[200px] bg-white border-emerald-200 text-gray-900 placeholder:text-gray-400 font-mono focus:border-emerald-500"
+              className="min-h-[120px] bg-white border-emerald-200 text-gray-900 placeholder:text-gray-400 font-mono focus:border-emerald-500"
             />
-            <div className="flex justify-between items-center">
-              {note && (
-                <p className="text-xs text-gray-500 font-mono">
-                  UPDATED {formatDistanceToNow(new Date(note.updated_at), { addSuffix: true }).toUpperCase()}
-                </p>
-              )}
+            <div className="flex items-center justify-between gap-2 border border-emerald-200 rounded-md p-3 bg-emerald-50/40">
+              <div className="flex items-center gap-2 text-xs text-emerald-800 font-mono">
+                <Paperclip className="h-4 w-4" />
+                PDF and image attachments for this query
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="application/pdf,image/png,image/jpeg,image/webp"
+                  onChange={handleUploadAttachment}
+                />
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={uploadingAttachment}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-emerald-300 text-emerald-700 hover:bg-emerald-100 font-mono"
+                >
+                  {uploadingAttachment ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      UPLOADING...
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-3 w-3 mr-1" />
+                      ADD FILE
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {attachments.length > 0 && (
+              <div className="space-y-2">
+                {attachments.map((a) => (
+                  <div key={a.id} className="flex items-center justify-between gap-3 border border-emerald-200 rounded-md p-3">
+                    <div className="min-w-0">
+                      <p className="text-sm text-gray-900 font-mono truncate">{a.file_name}</p>
+                      <p className="text-xs text-gray-500 font-mono">
+                        {a.mime_type} - {formatBytes(a.size_bytes)} - {formatDistanceToNow(new Date(a.created_at), { addSuffix: true })}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      {a.url && (
+                        <a
+                          href={a.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-emerald-600 hover:text-emerald-700 p-1"
+                          title="Open file"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAttachment(a.id)}
+                        disabled={deletingAttachmentId === a.id}
+                        className="p-1 rounded hover:bg-gray-100 text-red-600 disabled:opacity-50"
+                        title="Delete file"
+                      >
+                        {deletingAttachmentId === a.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end items-center">
               <Button
                 onClick={handleSaveNote}
-                disabled={saving}
+                disabled={saving || noteContent.trim().length === 0}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white ml-auto font-mono"
               >
-                {saving ? 'SAVING...' : 'SAVE.NOTE'}
+                {saving ? 'SAVING...' : 'ADD.NOTE'}
               </Button>
             </div>
+
+            {notes.length > 0 ? (
+              <div className="space-y-2 pt-1">
+                {notes.map((n, index) => (
+                  <Card key={n.id} className="bg-white border-emerald-200">
+                    <CardContent className="p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-emerald-700 font-mono font-semibold mb-1">
+                            NOTE {index + 1}
+                          </p>
+                          <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">
+                            {n.content}
+                          </p>
+                          <p className="text-xs text-gray-500 font-mono mt-2">
+                            {formatDistanceToNow(new Date(n.created_at), { addSuffix: true }).toUpperCase()}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteNote(n.id)}
+                          className="p-1 rounded hover:bg-gray-100 text-red-600"
+                          title="Delete note"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 font-mono">NO.NOTES.YET</p>
+            )}
           </CardContent>
         </Card>
       </TabsContent>
 
       <TabsContent value="official" className="mt-4">
-        <OfficialSources rawInput={rawInput || ''} />
+        <OfficialSources
+          rawInput={rawInput || ''}
+          onSaveLink={(payload) => toggleSaved({ ...payload, source: 'official' })}
+          isSaved={(url) => isSaved(url, 'official')}
+        />
+      </TabsContent>
+
+      <TabsContent value="saved" className="space-y-3 mt-4">
+        {scopedSavedLinks.length === 0 ? (
+          <Card className="bg-white border-emerald-200 shadow-sm">
+            <CardContent className="text-center py-12">
+              <p className="text-emerald-600/50 font-mono text-sm">NO.SAVED.LINKS</p>
+              <p className="text-gray-500 text-xs mt-2">Use the bookmark icon on Archive, Queries, or Official Sources to save links here.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-2">
+            {scopedSavedLinks.map((s) => (
+              <Card key={s.id} className="bg-white border-emerald-200 hover:border-emerald-300 transition-all">
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-gray-500 font-mono uppercase mb-1">{s.source}</p>
+                      <h3 className="text-gray-900 font-medium font-mono text-sm truncate">{s.title || s.url}</h3>
+                      {s.captured_at && (
+                        <p className="text-xs text-gray-500 mt-1 font-mono">
+                          Captured {formatDistanceToNow(new Date(s.captured_at), { addSuffix: true })}
+                        </p>
+                      )}
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-emerald-600 hover:text-emerald-700 underline break-all font-mono block mt-1"
+                      >
+                        {s.url}
+                      </a>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-600 hover:text-emerald-700 p-1"
+                        title="Open"
+                      >
+                        <ExternalLink className="h-5 w-5" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const res = await fetch(`/api/saved?id=${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+                            if (!res.ok) {
+                              const errBody = await res.json().catch(() => ({}));
+                              if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] saved item DELETE failed', res.status, errBody);
+                              throw new Error('Failed to remove');
+                            }
+                            toast.success('Removed from saved');
+                            await fetchSaved();
+                          } catch (e) {
+                            if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] saved item delete error', e.message);
+                            toast.error('Failed to remove');
+                          }
+                        }}
+                        className="p-1 rounded hover:bg-gray-100 text-emerald-600"
+                        title="Remove from saved"
+                      >
+                        <Bookmark className="h-5 w-5 fill-emerald-600" />
+                      </button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </TabsContent>
     </Tabs>
   );

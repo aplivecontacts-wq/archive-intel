@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ExternalLink, Loader2, Search, ChevronDown, ChevronUp } from 'lucide-react';
+import { ExternalLink, Loader2, Search, ChevronDown, ChevronUp, Bookmark } from 'lucide-react';
 
 type LookupState = 'idle' | 'loading' | 'found' | 'not_found' | 'error';
 
@@ -16,9 +16,11 @@ interface LookupResult {
 
 interface ArchiveLookupProps {
   activeTopic?: string;
+  isArchiveSaved?: (url: string) => boolean;
+  onToggleArchiveSave?: (url: string, title?: string) => void;
 }
 
-export function ArchiveLookup({ activeTopic }: ArchiveLookupProps) {
+export function ArchiveLookup({ activeTopic, isArchiveSaved, onToggleArchiveSave }: ArchiveLookupProps) {
   const [url, setUrl] = useState('');
   const [year, setYear] = useState('');
   const [fromDate, setFromDate] = useState('');
@@ -224,15 +226,31 @@ export function ArchiveLookup({ activeTopic }: ArchiveLookupProps) {
                 <p className="text-sm font-mono text-emerald-700 font-semibold">
                   Closest snapshot: {formatTimestamp(result.closest.timestamp)}
                 </p>
-                <a
-                  href={result.closest.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-mono text-sm"
-                >
-                  <ExternalLink className="h-4 w-4" />
-                  Open Snapshot
-                </a>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={result.closest.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-700 font-mono text-sm"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Open Snapshot
+                  </a>
+                  {onToggleArchiveSave && isArchiveSaved && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onToggleArchiveSave(result.closest!.url, `Wayback capture — ${formatTimestamp(result.closest!.timestamp)}`);
+                      }}
+                      className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-emerald-600 flex-shrink-0"
+                      title={isArchiveSaved(result.closest.url) ? 'Remove from saved' : 'Save link'}
+                    >
+                      <Bookmark className={`h-4 w-4 ${isArchiveSaved(result.closest.url) ? 'fill-emerald-600 text-emerald-600' : ''}`} />
+                    </button>
+                  )}
+                </div>
               </>
             )}
             {result.captures && result.captures.length > 1 && (
@@ -240,7 +258,7 @@ export function ArchiveLookup({ activeTopic }: ArchiveLookupProps) {
                 <p className="text-xs font-mono text-gray-600 font-semibold">All captures in range:</p>
                 <ul className="max-h-40 overflow-y-auto space-y-1">
                   {result.captures.map((c, i) => (
-                    <li key={i} className="text-xs font-mono">
+                    <li key={i} className="flex items-center justify-between gap-2 text-xs font-mono">
                       <a
                         href={c.waybackUrl}
                         target="_blank"
@@ -249,6 +267,20 @@ export function ArchiveLookup({ activeTopic }: ArchiveLookupProps) {
                       >
                         {formatTimestamp(c.timestamp)}
                       </a>
+                      {onToggleArchiveSave && isArchiveSaved && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            onToggleArchiveSave(c.waybackUrl, `Wayback capture — ${formatTimestamp(c.timestamp)}`);
+                          }}
+                          className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-emerald-600 flex-shrink-0"
+                          title={isArchiveSaved(c.waybackUrl) ? 'Remove from saved' : 'Save link'}
+                        >
+                          <Bookmark className={`h-4 w-4 ${isArchiveSaved(c.waybackUrl) ? 'fill-emerald-600 text-emerald-600' : ''}`} />
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>

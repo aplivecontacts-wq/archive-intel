@@ -151,6 +151,76 @@ export interface Database {
           user_id?: string | null
         }
       }
+      note_attachments: {
+        Row: {
+          id: string
+          user_id: string
+          query_id: string
+          file_name: string
+          mime_type: string
+          size_bytes: number
+          storage_path: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          query_id: string
+          file_name: string
+          mime_type: string
+          size_bytes: number
+          storage_path: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          query_id?: string
+          file_name?: string
+          mime_type?: string
+          size_bytes?: number
+          storage_path?: string
+          created_at?: string
+        }
+      }
+      saved_links: {
+        Row: {
+          id: string
+          user_id: string
+          source: 'archive' | 'query' | 'official'
+          url: string
+          title: string | null
+          snippet: string | null
+          captured_at: string | null
+          query_id: string | null
+          case_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          source: 'archive' | 'query' | 'official'
+          url: string
+          title?: string | null
+          snippet?: string | null
+          captured_at?: string | null
+          query_id?: string | null
+          case_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          source?: 'archive' | 'query' | 'official'
+          url?: string
+          title?: string | null
+          snippet?: string | null
+          captured_at?: string | null
+          query_id?: string | null
+          case_id?: string | null
+          created_at?: string
+        }
+      }
     }
   }
 }

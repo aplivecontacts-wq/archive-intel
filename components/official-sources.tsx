@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ExternalLink, Copy, AlertCircle } from 'lucide-react';
+import { ExternalLink, Copy, AlertCircle, Bookmark } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   officialSourceGroups,
@@ -26,9 +26,11 @@ import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
 
 interface OfficialSourcesProps {
   rawInput: string;
+  onSaveLink?: (payload: { url: string; title?: string; snippet?: string }) => void;
+  isSaved?: (url: string) => boolean;
 }
 
-export function OfficialSources({ rawInput }: OfficialSourcesProps) {
+export function OfficialSources({ rawInput, onSaveLink, isSaved }: OfficialSourcesProps) {
   const [selectedState, setSelectedState] = useState<string>('');
 
   const query = rawInput.trim();
@@ -83,7 +85,7 @@ export function OfficialSources({ rawInput }: OfficialSourcesProps) {
               <p className="text-xs text-emerald-600 font-mono">{source.domain}</p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 items-center">
               {searchUrl ? (
                 <>
                   <a
@@ -108,23 +110,49 @@ export function OfficialSources({ rawInput }: OfficialSourcesProps) {
                   >
                     <Copy className="h-3 w-3" />
                   </Button>
+                  {onSaveLink && (
+                    <button
+                      type="button"
+                      onClick={() => onSaveLink({ url: searchUrl, title: source.name, snippet: source.description })}
+                      className="p-2 rounded border border-emerald-200 hover:bg-emerald-50 text-gray-500 hover:text-emerald-600"
+                      title={isSaved?.(searchUrl) ? 'Remove from saved' : 'Save link'}
+                    >
+                      <Bookmark
+                        className={`h-4 w-4 ${isSaved?.(searchUrl) ? 'fill-emerald-600 text-emerald-600' : ''}`}
+                      />
+                    </button>
+                  )}
                 </>
               ) : (
-                <a
-                  href={domainUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex-1"
-                >
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-mono text-xs"
+                <>
+                  <a
+                    href={domainUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1"
                   >
-                    <ExternalLink className="h-3 w-3 mr-1" />
-                    {source.directUrl ? 'OPEN DISCLOSURE DATABASE' : 'VISIT SITE'}
-                  </Button>
-                </a>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-mono text-xs"
+                    >
+                      <ExternalLink className="h-3 w-3 mr-1" />
+                      {source.directUrl ? 'OPEN DISCLOSURE DATABASE' : 'VISIT SITE'}
+                    </Button>
+                  </a>
+                  {onSaveLink && (
+                    <button
+                      type="button"
+                      onClick={() => onSaveLink({ url: domainUrl, title: source.name, snippet: source.description })}
+                      className="p-2 rounded border border-emerald-200 hover:bg-emerald-50 text-gray-500 hover:text-emerald-600"
+                      title={isSaved?.(domainUrl) ? 'Remove from saved' : 'Save link'}
+                    >
+                      <Bookmark
+                        className={`h-4 w-4 ${isSaved?.(domainUrl) ? 'fill-emerald-600 text-emerald-600' : ''}`}
+                      />
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
