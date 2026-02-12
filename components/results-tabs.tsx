@@ -498,30 +498,28 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
 
   return (
     <Tabs defaultValue="archive" className="w-full min-w-0">
-      <div className="w-full overflow-x-auto pb-1">
-      <TabsList className="bg-gray-100 border-emerald-200 font-mono min-w-max">
-        <TabsTrigger value="archive" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
-          <Clock className="h-4 w-4 mr-2" />
+      <TabsList className="w-full h-auto flex flex-wrap justify-start gap-1 bg-gray-100 border-emerald-200 font-mono p-1">
+        <TabsTrigger value="archive" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <Clock className="hidden sm:inline h-4 w-4 mr-2" />
           ARCHIVE ({archiveResults.length})
         </TabsTrigger>
-        <TabsTrigger value="queries" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
-          <Search className="h-4 w-4 mr-2" />
+        <TabsTrigger value="queries" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <Search className="hidden sm:inline h-4 w-4 mr-2" />
           QUERIES ({discoveryQueries.length})
         </TabsTrigger>
-        <TabsTrigger value="notes" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
-          <FileText className="h-4 w-4 mr-2" />
+        <TabsTrigger value="notes" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <FileText className="hidden sm:inline h-4 w-4 mr-2" />
           NOTES ({notes.length})
         </TabsTrigger>
-        <TabsTrigger value="official" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
-          <Building2 className="h-4 w-4 mr-2" />
+        <TabsTrigger value="official" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <Building2 className="hidden sm:inline h-4 w-4 mr-2" />
           OFFICIAL SOURCES
         </TabsTrigger>
-        <TabsTrigger value="saved" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
-          <Bookmark className="h-4 w-4 mr-2" />
+        <TabsTrigger value="saved" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <Bookmark className="hidden sm:inline h-4 w-4 mr-2" />
           SAVED ({scopedSavedLinks.length})
         </TabsTrigger>
       </TabsList>
-      </div>
 
       <TabsContent value="archive" className="space-y-3 mt-4">
         <ArchiveLookup
