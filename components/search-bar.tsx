@@ -80,7 +80,7 @@ export function SearchBar({ caseId, onQueryCreated }: SearchBarProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="flex gap-2">
+      <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-emerald-600" />
           <Input
@@ -95,13 +95,13 @@ export function SearchBar({ caseId, onQueryCreated }: SearchBarProps) {
         <Button
           type="submit"
           disabled={loading || !input.trim()}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 h-12 font-mono"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto px-4 sm:px-8 h-12 font-mono"
         >
           {loading ? 'RUNNING...' : 'EXECUTE'}
         </Button>
       </div>
       {input.trim() && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-emerald-700 font-mono">TYPE.DETECTED:</span>
           <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
             {getIcon()}
