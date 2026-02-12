@@ -103,7 +103,7 @@ export default function CasePage() {
 
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-auto bg-gradient-to-b from-emerald-50 to-white">
-          <div className="container mx-auto p-6 space-y-6">
+          <div className="container mx-auto px-3 py-4 sm:px-4 sm:py-5 lg:p-6 space-y-4 sm:space-y-5 lg:space-y-6">
             <div className="lg:hidden">
               <Sheet>
                 <SheetTrigger asChild>
@@ -115,7 +115,7 @@ export default function CasePage() {
                     MENU
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="p-0 w-72">
+                <SheetContent side="left" className="p-0 w-[85vw] max-w-[20rem]">
                   <SidebarCases cases={cases} onCaseCreated={fetchCases} />
                 </SheetContent>
               </Sheet>
