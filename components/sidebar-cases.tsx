@@ -114,7 +114,7 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
   };
 
   return (
-    <div className="w-64 bg-white border-r border-emerald-200 flex flex-col h-screen">
+    <div className="w-full lg:w-64 bg-white border-r border-emerald-200 flex flex-col h-[100dvh] lg:h-screen">
       <div className="p-4 border-b border-emerald-200">
         <Link href="/" className="flex items-center space-x-2">
           <Terminal className="h-6 w-6 text-emerald-600" />

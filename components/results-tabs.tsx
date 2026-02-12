@@ -497,8 +497,9 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
   }
 
   return (
-    <Tabs defaultValue="archive" className="w-full">
-      <TabsList className="bg-gray-100 border-emerald-200 font-mono">
+    <Tabs defaultValue="archive" className="w-full min-w-0">
+      <div className="w-full overflow-x-auto pb-1">
+      <TabsList className="bg-gray-100 border-emerald-200 font-mono min-w-max">
         <TabsTrigger value="archive" className="data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <Clock className="h-4 w-4 mr-2" />
           ARCHIVE ({archiveResults.length})
@@ -520,6 +521,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
           SAVED ({scopedSavedLinks.length})
         </TabsTrigger>
       </TabsList>
+      </div>
 
       <TabsContent value="archive" className="space-y-3 mt-4">
         <ArchiveLookup
