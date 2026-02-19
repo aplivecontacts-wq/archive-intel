@@ -32,6 +32,20 @@ export function normalizeInput(input: string, type: InputType): string {
   return trimmed;
 }
 
+/**
+ * Sanitize a search snippet for use in Google URLs and display.
+ * Google does not support site:* (wildcard) in site: operator; it breaks the search.
+ * Replaces those patterns so the link works and the displayed query is clear.
+ */
+export function sanitizeSnippetForGoogle(snippet: string): string {
+  return snippet
+    .replace(/site:\*\.news/gi, 'news')
+    .replace(/site:\*\.com\/news/gi, 'news')
+    .replace(/site:\*\.forum/gi, 'forum')
+    .replace(/site:\*\.gov/gi, '.gov')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 export interface QueryWithCategory {
   source: 'search';

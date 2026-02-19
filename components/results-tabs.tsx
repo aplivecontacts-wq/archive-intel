@@ -11,7 +11,7 @@ import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, 
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
-import { generateMockSearchQueries, detectInputType, type QueryWithCategory } from '@/lib/query-utils';
+import { generateMockSearchQueries, detectInputType, sanitizeSnippetForGoogle, type QueryWithCategory } from '@/lib/query-utils';
 import { groupQueries, CATEGORY_ORDER, CATEGORY_LABELS } from '@/lib/groupQueries';
 import { getObservedEmailInsights } from '@/lib/email-patterns';
 import { OfficialSources } from '@/components/official-sources';
@@ -857,13 +857,14 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                     </h3>
                     <div className="space-y-2">
                       {itemsToShow.map((result, idx) => {
-                        const googleSearchUrl = result.snippet
-                          ? `https://www.google.com/search?q=${encodeURIComponent(result.snippet)}`
+                        const snippetForGoogle = result.snippet ? sanitizeSnippetForGoogle(result.snippet) : '';
+                        const googleSearchUrl = snippetForGoogle
+                          ? `https://www.google.com/search?q=${encodeURIComponent(snippetForGoogle)}`
                           : null;
 
                         const handleCopyQuery = () => {
-                          if (result.snippet) {
-                            navigator.clipboard.writeText(result.snippet);
+                          if (snippetForGoogle) {
+                            navigator.clipboard.writeText(snippetForGoogle);
                             toast.success('Query copied to clipboard');
                           }
                         };
@@ -885,7 +886,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                                         onClick={handleCopyQuery}
                                         title="Click to copy"
                                       >
-                                        {result.snippet}
+                                        {snippetForGoogle || result.snippet}
                                       </code>
                                       <Button
                                         onClick={handleCopyQuery}
@@ -911,7 +912,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                                     </a>
                                     <button
                                       type="button"
-                                      onClick={() => toggleSaved({ source: 'query', url: googleSearchUrl, title: result.title ?? undefined, snippet: result.snippet ?? undefined })}
+                                      onClick={() => toggleSaved({ source: 'query', url: googleSearchUrl, title: result.title ?? undefined, snippet: snippetForGoogle || result.snippet ?? undefined })}
                                       className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-emerald-600"
                                       title={isSaved(googleSearchUrl, 'query') ? 'Remove from saved' : 'Save link'}
                                     >
