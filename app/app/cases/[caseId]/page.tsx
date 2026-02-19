@@ -124,10 +124,10 @@ export default function CasePage() {
 
             <Card className="bg-white border-emerald-200 shadow-sm">
               <CardHeader>
-                <CardTitle className="text-emerald-700 text-2xl font-mono">
+                <CardTitle className="text-emerald-700 text-lg font-mono lg:text-2xl">
                   {currentCase?.title || 'LOADING...'}
                 </CardTitle>
-                <CardDescription className="text-gray-600 font-mono text-sm">
+                <CardDescription className="text-gray-600 font-mono text-xs lg:text-sm">
                   {currentCase && `CREATED: ${new Date(currentCase.created_at).toLocaleDateString('en-US', {
                     year: 'numeric',
                     month: 'long',

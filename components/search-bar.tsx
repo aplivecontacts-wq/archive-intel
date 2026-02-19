@@ -82,20 +82,20 @@ export function SearchBar({ caseId, onQueryCreated }: SearchBarProps) {
     <form onSubmit={handleSubmit} className="space-y-3">
       <div className="flex flex-col sm:flex-row gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-emerald-600" />
+          <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 h-4 w-4 lg:h-5 lg:w-5 text-emerald-600" />
           <Input
             type="text"
             placeholder="Enter URL, username, or search term..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            className="pl-10 bg-white border-emerald-200 text-gray-900 placeholder:text-gray-400 h-12 text-base font-mono focus:border-emerald-500"
+            className="pl-9 lg:pl-10 bg-white border-emerald-200 text-gray-900 placeholder:text-gray-400 h-10 text-sm font-mono focus:border-emerald-500 lg:h-12 lg:text-base"
             disabled={loading}
           />
         </div>
         <Button
           type="submit"
           disabled={loading || !input.trim()}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto px-4 sm:px-8 h-12 font-mono"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white w-full sm:w-auto px-3 sm:px-6 lg:px-8 h-10 text-sm font-mono lg:h-12 lg:text-base"
         >
           {loading ? 'RUNNING...' : 'EXECUTE'}
         </Button>
