@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
 
+export const dynamic = 'force-dynamic';
+
 interface CacheEntry {
   data: any;
   timestamp: number;
@@ -64,7 +66,11 @@ async function fetchAvailability(url: string) {
     const timeout = setTimeout(() => controller.abort(), 15000);
 
     const response = await fetch(availabilityUrl, {
-      signal: controller.signal
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: {
+        'User-Agent': 'ArchiveIntel-App/1.0 (https://github.com/archiveintel)',
+      },
     });
 
     clearTimeout(timeout);
@@ -90,7 +96,11 @@ async function fetchCDXData(url: string) {
     const timeout = setTimeout(() => controller.abort(), 20000);
 
     const response = await fetch(cdxUrl, {
-      signal: controller.signal
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: {
+        'User-Agent': 'ArchiveIntel-App/1.0 (https://github.com/archiveintel)',
+      },
     });
 
     clearTimeout(timeout);

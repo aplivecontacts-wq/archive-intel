@@ -41,7 +41,13 @@ export async function GET(request: NextRequest) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
-    const response = await fetch(cdxUrl, { signal: controller.signal, cache: 'no-store' });
+    const response = await fetch(cdxUrl, {
+      signal: controller.signal,
+      cache: 'no-store',
+      headers: {
+        'User-Agent': 'ArchiveIntel-App/1.0 (https://github.com/archiveintel)',
+      },
+    });
     clearTimeout(timeout);
 
     if (!response.ok) {

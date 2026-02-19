@@ -183,6 +183,35 @@ export interface Database {
           created_at?: string
         }
       }
+      case_briefs: {
+        Row: {
+          id: string
+          case_id: string
+          clerk_user_id: string
+          version_number: number
+          brief_json: Json
+          evidence_counts: Json | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          case_id: string
+          clerk_user_id: string
+          version_number: number
+          brief_json: Json
+          evidence_counts?: Json | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          case_id?: string
+          clerk_user_id?: string
+          version_number?: number
+          brief_json?: Json
+          evidence_counts?: Json | null
+          created_at?: string
+        }
+      }
       saved_links: {
         Row: {
           id: string

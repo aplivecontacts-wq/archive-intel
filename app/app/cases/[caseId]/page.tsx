@@ -9,6 +9,7 @@ import { ResultsTabs } from '@/components/results-tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
+import { CaseBriefs } from '@/components/case-briefs';
 import { detectInputType } from '@/lib/query-utils';
 import { Menu } from 'lucide-react';
 
@@ -134,7 +135,8 @@ export default function CasePage() {
                   }).toUpperCase()}`}
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
+                <CaseBriefs caseId={caseId ?? ''} />
                 <SearchBar
                   caseId={caseId}
                   onQueryCreated={(newQueryId, rawInput, fullQuery) => {
