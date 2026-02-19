@@ -912,7 +912,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                                     </a>
                                     <button
                                       type="button"
-                                      onClick={() => toggleSaved({ source: 'query', url: googleSearchUrl, title: result.title ?? undefined, snippet: snippetForGoogle || result.snippet ?? undefined })}
+                                      onClick={() => toggleSaved({ source: 'query', url: googleSearchUrl, title: result.title ?? undefined, snippet: (snippetForGoogle || result.snippet) ?? undefined })}
                                       className="p-1 rounded hover:bg-gray-100 text-gray-500 hover:text-emerald-600"
                                       title={isSaved(googleSearchUrl, 'query') ? 'Remove from saved' : 'Save link'}
                                     >
