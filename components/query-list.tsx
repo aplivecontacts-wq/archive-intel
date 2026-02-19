@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -126,7 +125,7 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
 
   return (
     <>
-      <ScrollArea className="h-[600px]">
+      <div className="max-h-[600px] overflow-y-auto">
         <div className="space-y-2">
           {queries.map((query) => {
             const isActive = selectedQueryId === query.id;
@@ -191,7 +190,7 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
             );
           })}
         </div>
-      </ScrollArea>
+      </div>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent className="bg-white border-emerald-200">
