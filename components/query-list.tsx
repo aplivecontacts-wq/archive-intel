@@ -133,9 +133,17 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
 
             return (
               <div key={query.id} className="relative group">
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => onSelectQuery(query.id)}
-                  className={`w-full text-left p-3 rounded-lg border transition-all ${
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onSelectQuery(query.id);
+                    }
+                  }}
+                  className={`w-full text-left p-3 rounded-lg border transition-all cursor-pointer ${
                     isActive
                       ? 'bg-emerald-50 border-emerald-300 shadow-sm'
                       : 'bg-white border-emerald-200 hover:border-emerald-300 hover:shadow-sm'
@@ -159,6 +167,7 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
                         <FileText className="h-4 w-4 text-emerald-600" />
                       )}
                       <button
+                        type="button"
                         onClick={(e) => handleDeleteClick(e, query.id)}
                         className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded text-red-600 hover:text-red-700"
                         title="Delete query"
@@ -185,7 +194,7 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
                       </Badge>
                     )}
                   </div>
-                </button>
+                </div>
               </div>
             );
           })}

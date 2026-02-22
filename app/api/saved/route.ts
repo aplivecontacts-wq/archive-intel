@@ -9,7 +9,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data, error } = await (supabaseServer.from('saved_links') as any)
+    const { data: links, error } = await (supabaseServer.from('saved_links') as any)
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
@@ -19,7 +19,29 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ saved: data || [] });
+    const list = links || [];
+    const linkIds = list.map((l: { id: string }) => l.id);
+    const savedWithNotes = list.map((l: Record<string, unknown>) => ({ ...l, notes: [] as { id: string; content: string; created_at: string }[] }));
+
+    if (linkIds.length > 0) {
+      const { data: notesRows, error: notesErr } = await (supabaseServer.from('saved_link_notes') as any)
+        .select('id, saved_link_id, content, created_at')
+        .in('saved_link_id', linkIds)
+        .order('created_at', { ascending: true });
+      if (!notesErr && notesRows?.length) {
+        const byLink = new Map<string, { id: string; content: string; created_at: string }[]>();
+        for (const n of notesRows) {
+          const arr = byLink.get(n.saved_link_id) ?? [];
+          arr.push({ id: n.id, content: n.content, created_at: n.created_at });
+          byLink.set(n.saved_link_id, arr);
+        }
+        for (const item of savedWithNotes) {
+          item.notes = byLink.get(item.id as string) ?? [];
+        }
+      }
+    }
+
+    return NextResponse.json({ saved: savedWithNotes });
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Failed to fetch saved links';
     if (process.env.NODE_ENV === 'development') console.error('[api/saved] GET catch:', error);
@@ -117,6 +139,57 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Failed to save link';
     if (process.env.NODE_ENV === 'development') console.error('[api/saved] POST catch:', error);
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { id, link_notes } = body;
+
+    if (!id || typeof id !== 'string') {
+      return NextResponse.json({ error: 'id is required' }, { status: 400 });
+    }
+    if (link_notes !== undefined && link_notes !== null && typeof link_notes !== 'string') {
+      return NextResponse.json({ error: 'link_notes must be a string or null' }, { status: 400 });
+    }
+
+    const { data: row, error: fetchError } = await (supabaseServer.from('saved_links') as any)
+      .select('id')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (fetchError || !row) {
+      return NextResponse.json({ error: 'Not found or access denied' }, { status: 404 });
+    }
+
+    const value = link_notes == null ? null : String(link_notes);
+    const { data: updated, error } = await (supabaseServer.from('saved_links') as any)
+      .update({ link_notes: value })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      if (process.env.NODE_ENV === 'development') console.error('[api/saved] PATCH error:', error);
+      const msg = (error as { message?: string }).message ?? String(error);
+      const hint = /does not exist|undefined column|link_notes/i.test(msg)
+        ? ' Run database migrations (e.g. supabase db push).'
+        : '';
+      return NextResponse.json({ error: msg + hint }, { status: 500 });
+    }
+    return NextResponse.json({ saved: updated });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : 'Failed to update saved link note';
+    if (process.env.NODE_ENV === 'development') console.error('[api/saved] PATCH catch:', error);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

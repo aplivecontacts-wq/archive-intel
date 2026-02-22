@@ -191,6 +191,7 @@ export interface Database {
           version_number: number
           brief_json: Json
           evidence_counts: Json | null
+          user_note: string | null
           created_at: string
         }
         Insert: {
@@ -200,6 +201,7 @@ export interface Database {
           version_number: number
           brief_json: Json
           evidence_counts?: Json | null
+          user_note?: string | null
           created_at?: string
         }
         Update: {
@@ -209,6 +211,7 @@ export interface Database {
           version_number?: number
           brief_json?: Json
           evidence_counts?: Json | null
+          user_note?: string | null
           created_at?: string
         }
       }
@@ -223,6 +226,7 @@ export interface Database {
           captured_at: string | null
           query_id: string | null
           case_id: string | null
+          link_notes: string | null
           created_at: string
         }
         Insert: {
@@ -235,6 +239,7 @@ export interface Database {
           captured_at?: string | null
           query_id?: string | null
           case_id?: string | null
+          link_notes?: string | null
           created_at?: string
         }
         Update: {
@@ -247,6 +252,27 @@ export interface Database {
           captured_at?: string | null
           query_id?: string | null
           case_id?: string | null
+          link_notes?: string | null
+          created_at?: string
+        }
+      }
+      saved_link_notes: {
+        Row: {
+          id: string
+          saved_link_id: string
+          content: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          saved_link_id: string
+          content?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          saved_link_id?: string
+          content?: string
           created_at?: string
         }
       }

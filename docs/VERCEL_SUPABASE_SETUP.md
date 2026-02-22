@@ -4,6 +4,26 @@ Use this to copy env vars from your project into **Vercel** and to configure **S
 
 ---
 
+## 0. Deploy from here (CLI)
+
+From the project root:
+
+1. **Log in to Vercel** (once):  
+   `npx vercel login`  
+   Follow the browser/link to authenticate.
+
+2. **Preview deploy** (branch/PR):  
+   `npx vercel`  
+   Prompts to link the project if first time; then builds and gives a preview URL.
+
+3. **Production deploy**:  
+   `npx vercel --prod`  
+   Deploys to your production domain.
+
+If the project is not yet linked to a Vercel project, the CLI will ask you to create or link one.
+
+---
+
 ## 1. Vercel (Environment Variables)
 
 In **Vercel** → your project → **Settings** → **Environment Variables**, add these.  

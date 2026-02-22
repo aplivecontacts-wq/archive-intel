@@ -56,13 +56,43 @@ export async function GET(
       ? format(new Date(brief.created_at), 'yyyy-MM-dd HH:mm')
       : '';
 
+    const { data: savedRaw } = await (supabaseServer.from('saved_links') as any)
+      .select('id, source, url, title, captured_at, created_at')
+      .eq('user_id', userId)
+      .eq('case_id', caseId)
+      .order('created_at', { ascending: false });
+
+    const linkIds = (savedRaw || []).map((s: { id: string }) => s.id);
+    let notesByLink: Record<string, { content: string; created_at: string }[]> = {};
+    if (linkIds.length > 0) {
+      const { data: notesRaw } = await (supabaseServer.from('saved_link_notes') as any)
+        .select('saved_link_id, content, created_at')
+        .in('saved_link_id', linkIds)
+        .order('created_at', { ascending: true });
+      const byLink = new Map<string, { content: string; created_at: string }[]>();
+      for (const n of notesRaw || []) {
+        const arr = byLink.get(n.saved_link_id) ?? [];
+        arr.push({ content: n.content, created_at: n.created_at });
+        byLink.set(n.saved_link_id, arr);
+      }
+      notesByLink = Object.fromEntries(byLink);
+    }
+
+    const saved_links_with_notes = (savedRaw || []).map((s: Record<string, unknown>) => ({
+      source: s.source,
+      url: s.url,
+      title: s.title,
+      notes: notesByLink[s.id as string] ?? [],
+    }));
+
     let pdfBytes: Uint8Array;
     try {
       pdfBytes = buildBriefPdf(
         caseTitle,
         versionNumber,
         createdAt,
-        brief.brief_json
+        brief.brief_json,
+        saved_links_with_notes
       );
     } catch (pdfError) {
       const message =

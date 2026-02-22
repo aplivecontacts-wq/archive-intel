@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon, Bookmark, Paperclip, Upload, Trash2 } from 'lucide-react';
+import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon, Bookmark, Paperclip, Upload, Trash2, StickyNote } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
@@ -38,6 +38,12 @@ interface Note {
   updated_at: string;
 }
 
+interface SavedLinkNoteRow {
+  id: string;
+  content: string;
+  created_at: string;
+}
+
 interface SavedLinkRow {
   id: string;
   user_id: string;
@@ -48,7 +54,9 @@ interface SavedLinkRow {
   captured_at: string | null;
   query_id: string | null;
   case_id: string | null;
+  link_notes?: string | null;
   created_at: string;
+  notes?: SavedLinkNoteRow[];
 }
 
 interface NoteAttachment {
@@ -65,6 +73,174 @@ interface ResultsTabsProps {
   queryStatus: 'running' | 'complete';
   rawInput?: string;
   caseId?: string;
+}
+
+function SavedLinkCard({
+  saved: s,
+  onRemove,
+  onNoteSaved,
+}: {
+  saved: SavedLinkRow;
+  onRemove: () => Promise<void>;
+  onNoteSaved: () => Promise<void>;
+}) {
+  const [showNotes, setShowNotes] = useState(false);
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const notes = s.notes ?? [];
+
+  const handleAddNote = useCallback(async () => {
+    const trimmed = newNoteContent.trim();
+    if (!trimmed) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/saved/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ saved_link_id: s.id, content: trimmed }),
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        const msg = (errBody && typeof errBody.error === 'string') ? errBody.error : 'Failed to add note';
+        if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] saved link add note failed', res.status, errBody);
+        throw new Error(msg);
+      }
+      setNewNoteContent('');
+      toast.success('Note added');
+      await onNoteSaved();
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] saved link add note error', e.message);
+      toast.error(e instanceof Error ? e.message : 'Failed to add note');
+    } finally {
+      setSaving(false);
+    }
+  }, [s.id, newNoteContent, onNoteSaved]);
+
+  const handleDeleteNote = useCallback(async (noteId: string) => {
+    setDeletingId(noteId);
+    try {
+      const res = await fetch(`/api/saved/notes?id=${encodeURIComponent(noteId)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] saved link delete note failed', res.status, errBody);
+        throw new Error('Failed to delete note');
+      }
+      toast.success('Note removed');
+      await onNoteSaved();
+    } catch (e) {
+      if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] saved link delete note error', e.message);
+      toast.error(e instanceof Error ? e.message : 'Failed to delete note');
+    } finally {
+      setDeletingId(null);
+    }
+  }, [onNoteSaved]);
+
+  return (
+    <Card className="bg-white border-emerald-200 hover:border-emerald-300 transition-all">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-500 font-mono uppercase mb-1">{s.source}</p>
+            <h3 className="text-gray-900 font-medium font-mono text-sm truncate">{s.title || s.url}</h3>
+            {s.captured_at && (
+              <p className="text-xs text-gray-500 mt-1 font-mono">
+                Captured {formatDistanceToNow(new Date(s.captured_at), { addSuffix: true })}
+              </p>
+            )}
+            <a
+              href={s.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-emerald-600 hover:text-emerald-700 underline break-all font-mono block mt-1"
+            >
+              {s.url}
+            </a>
+          </div>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowNotes((v) => !v)}
+              className={`p-1 rounded hover:bg-gray-100 ${showNotes || notes.length > 0 ? 'text-amber-600' : 'text-gray-400'}`}
+              title="Notes"
+            >
+              <StickyNote className={`h-5 w-5 ${notes.length > 0 ? 'fill-amber-200' : ''}`} />
+            </button>
+            <a
+              href={s.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-600 hover:text-emerald-700 p-1"
+              title="Open"
+            >
+              <ExternalLink className="h-5 w-5" />
+            </a>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="p-1 rounded hover:bg-gray-100 text-emerald-600"
+              title="Remove from saved"
+            >
+              <Bookmark className="h-5 w-5 fill-emerald-600" />
+            </button>
+          </div>
+        </div>
+        {showNotes && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <label className="text-xs font-mono text-gray-500 uppercase block mb-1">Notes (e.g. URLs or text from this link)</label>
+            <Textarea
+              value={newNoteContent}
+              onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setNewNoteContent(e.target.value)}
+              placeholder="Paste URLs or notes…"
+              className="min-h-[72px] text-sm font-mono resize-y mb-2"
+            />
+            <div className="flex justify-end mb-3">
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleAddNote}
+                disabled={saving || !newNoteContent.trim()}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-mono"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'ADD.NOTE'}
+              </Button>
+            </div>
+            {notes.length > 0 ? (
+              <div className="space-y-2">
+                {notes.map((n, index) => (
+                  <Card key={n.id} className="bg-white border-emerald-200">
+                    <CardContent className="p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs text-emerald-700 font-mono font-semibold mb-1">NOTE {index + 1}</p>
+                          <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{n.content}</p>
+                          <p className="text-xs text-gray-500 font-mono mt-2">
+                            {formatDistanceToNow(new Date(n.created_at), { addSuffix: true }).toUpperCase()}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteNote(n.id)}
+                          disabled={deletingId === n.id}
+                          className="p-1 rounded hover:bg-gray-100 text-red-600 disabled:opacity-50"
+                          title="Delete note"
+                        >
+                          {deletingId === n.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500 font-mono">NO.NOTES.YET</p>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 const linkifyText = (text: string) => {
@@ -1137,62 +1313,26 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
         ) : (
           <div className="space-y-2">
             {scopedSavedLinks.map((s) => (
-              <Card key={s.id} className="bg-white border-emerald-200 hover:border-emerald-300 transition-all">
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-gray-500 font-mono uppercase mb-1">{s.source}</p>
-                      <h3 className="text-gray-900 font-medium font-mono text-sm truncate">{s.title || s.url}</h3>
-                      {s.captured_at && (
-                        <p className="text-xs text-gray-500 mt-1 font-mono">
-                          Captured {formatDistanceToNow(new Date(s.captured_at), { addSuffix: true })}
-                        </p>
-                      )}
-                      <a
-                        href={s.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-emerald-600 hover:text-emerald-700 underline break-all font-mono block mt-1"
-                      >
-                        {s.url}
-                      </a>
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <a
-                        href={s.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-emerald-600 hover:text-emerald-700 p-1"
-                        title="Open"
-                      >
-                        <ExternalLink className="h-5 w-5" />
-                      </a>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const res = await fetch(`/api/saved?id=${encodeURIComponent(s.id)}`, { method: 'DELETE' });
-                            if (!res.ok) {
-                              const errBody = await res.json().catch(() => ({}));
-                              if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] saved item DELETE failed', res.status, errBody);
-                              throw new Error('Failed to remove');
-                            }
-                            toast.success('Removed from saved');
-                            await fetchSaved();
-                          } catch (e) {
-                            if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] saved item delete error', e.message);
-                            toast.error('Failed to remove');
-                          }
-                        }}
-                        className="p-1 rounded hover:bg-gray-100 text-emerald-600"
-                        title="Remove from saved"
-                      >
-                        <Bookmark className="h-5 w-5 fill-emerald-600" />
-                      </button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+              <SavedLinkCard
+                key={s.id}
+                saved={s}
+                onRemove={async () => {
+                  try {
+                    const res = await fetch(`/api/saved?id=${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+                    if (!res.ok) {
+                      const errBody = await res.json().catch(() => ({}));
+                      if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] saved item DELETE failed', res.status, errBody);
+                      throw new Error('Failed to remove');
+                    }
+                    toast.success('Removed from saved');
+                    await fetchSaved();
+                  } catch (e) {
+                    if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] saved item delete error', e.message);
+                    toast.error('Failed to remove');
+                  }
+                }}
+                onNoteSaved={fetchSaved}
+              />
             ))}
           </div>
         )}
