@@ -14,6 +14,7 @@ export interface Database {
           id: string
           title: string
           tags: Json
+          objective: string | null
           created_at: string
           user_id: string | null
         }
@@ -21,6 +22,7 @@ export interface Database {
           id?: string
           title: string
           tags?: Json
+          objective?: string | null
           created_at?: string
           user_id?: string | null
         }
@@ -28,6 +30,7 @@ export interface Database {
           id?: string
           title?: string
           tags?: Json
+          objective?: string | null
           created_at?: string
           user_id?: string | null
         }
@@ -122,6 +125,29 @@ export interface Database {
           tier?: 'free' | 'basic' | 'pro'
           stripe_customer_id?: string | null
           expires_at?: string | null
+          updated_at?: string
+        }
+      }
+      user_token_usage: {
+        Row: {
+          user_id: string
+          prompt_tokens: number
+          completion_tokens: number
+          total_tokens: number
+          updated_at: string
+        }
+        Insert: {
+          user_id: string
+          prompt_tokens?: number
+          completion_tokens?: number
+          total_tokens?: number
+          updated_at?: string
+        }
+        Update: {
+          user_id?: string
+          prompt_tokens?: number
+          completion_tokens?: number
+          total_tokens?: number
           updated_at?: string
         }
       }
@@ -227,6 +253,15 @@ export interface Database {
           query_id: string | null
           case_id: string | null
           link_notes: string | null
+          source_tier: 'primary' | 'secondary' | null
+          extracted_text: string | null
+          extracted_at: string | null
+          extraction_error: string | null
+          extracted_facts: { key_claims: string[]; key_entities: string[]; key_dates: string[]; summary: string } | null
+          ai_summary: string | null
+          ai_key_facts: string[] | null
+          ai_entities: { name: string; type: string; context: string }[] | null
+          ai_analyzed_at: string | null
           created_at: string
         }
         Insert: {
@@ -240,6 +275,15 @@ export interface Database {
           query_id?: string | null
           case_id?: string | null
           link_notes?: string | null
+          source_tier?: 'primary' | 'secondary' | null
+          extracted_text?: string | null
+          extracted_at?: string | null
+          extraction_error?: string | null
+          extracted_facts?: { key_claims: string[]; key_entities: string[]; key_dates: string[]; summary: string } | null
+          ai_summary?: string | null
+          ai_key_facts?: string[] | null
+          ai_entities?: { name: string; type: string; context: string }[] | null
+          ai_analyzed_at?: string | null
           created_at?: string
         }
         Update: {
@@ -253,6 +297,15 @@ export interface Database {
           query_id?: string | null
           case_id?: string | null
           link_notes?: string | null
+          source_tier?: 'primary' | 'secondary' | null
+          extracted_text?: string | null
+          extracted_at?: string | null
+          extraction_error?: string | null
+          extracted_facts?: { key_claims: string[]; key_entities: string[]; key_dates: string[]; summary: string } | null
+          ai_summary?: string | null
+          ai_key_facts?: string[] | null
+          ai_entities?: { name: string; type: string; context: string }[] | null
+          ai_analyzed_at?: string | null
           created_at?: string
         }
       }
@@ -274,6 +327,117 @@ export interface Database {
           saved_link_id?: string
           content?: string
           created_at?: string
+        }
+      }
+      case_entities: {
+        Row: {
+          id: string
+          case_id: string
+          user_id: string
+          name: string
+          entity_type: string
+          mention_count: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          case_id: string
+          user_id: string
+          name: string
+          entity_type: string
+          mention_count?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          case_id?: string
+          user_id?: string
+          name?: string
+          entity_type?: string
+          mention_count?: number
+          created_at?: string
+        }
+      }
+      entity_mentions: {
+        Row: {
+          id: string
+          case_id: string
+          user_id: string
+          entity_id: string
+          evidence_kind: string
+          evidence_id: string
+          query_id: string | null
+          source_ref: string | null
+          context_snippet: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          case_id: string
+          user_id: string
+          entity_id: string
+          evidence_kind: string
+          evidence_id: string
+          query_id?: string | null
+          source_ref?: string | null
+          context_snippet?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          case_id?: string
+          user_id?: string
+          entity_id?: string
+          evidence_kind?: string
+          evidence_id?: string
+          query_id?: string | null
+          source_ref?: string | null
+          context_snippet?: string | null
+          created_at?: string
+        }
+      }
+      case_tasks: {
+        Row: {
+          id: string
+          case_id: string
+          user_id: string
+          title: string
+          detail: string | null
+          priority: string
+          status: string
+          linked_entity_ids: string[] | null
+          linked_evidence_ids: string[] | null
+          source: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          case_id: string
+          user_id: string
+          title: string
+          detail?: string | null
+          priority?: string
+          status?: string
+          linked_entity_ids?: string[] | null
+          linked_evidence_ids?: string[] | null
+          source?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          case_id?: string
+          user_id?: string
+          title?: string
+          detail?: string | null
+          priority?: string
+          status?: string
+          linked_entity_ids?: string[] | null
+          linked_evidence_ids?: string[] | null
+          source?: string
+          created_at?: string
+          updated_at?: string
         }
       }
     }

@@ -3,11 +3,13 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ChangeEvent } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon, Bookmark, Paperclip, Upload, Trash2, StickyNote } from 'lucide-react';
+import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon, Bookmark, Paperclip, Upload, Trash2, StickyNote, PenLine } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
@@ -44,6 +46,13 @@ interface SavedLinkNoteRow {
   created_at: string;
 }
 
+interface ExtractedFactsShape {
+  key_claims?: string[];
+  key_entities?: string[];
+  key_dates?: string[];
+  summary?: string;
+}
+
 interface SavedLinkRow {
   id: string;
   user_id: string;
@@ -55,6 +64,12 @@ interface SavedLinkRow {
   query_id: string | null;
   case_id: string | null;
   link_notes?: string | null;
+  source_tier?: 'primary' | 'secondary' | null;
+  extracted_facts?: ExtractedFactsShape | null;
+  extracted_at?: string | null;
+  extraction_error?: string | null;
+  ai_summary?: string | null;
+  ai_key_facts?: string[] | null;
   created_at: string;
   notes?: SavedLinkNoteRow[];
 }
@@ -79,17 +94,41 @@ function SavedLinkCard({
   saved: s,
   onRemove,
   onNoteSaved,
+  onSourceTierChange,
+  caseId,
+  onExtract,
 }: {
   saved: SavedLinkRow;
   onRemove: () => Promise<void>;
   onNoteSaved: () => Promise<void>;
+  onSourceTierChange?: (savedLinkId: string, source_tier: 'primary' | 'secondary' | null) => Promise<void>;
+  caseId?: string | null;
+  onExtract?: (savedLinkId: string) => Promise<void>;
 }) {
   const [showNotes, setShowNotes] = useState(false);
+  const [showKeyClaims, setShowKeyClaims] = useState(false);
   const [newNoteContent, setNewNoteContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [updatingTier, setUpdatingTier] = useState(false);
+  const [extracting, setExtracting] = useState(false);
 
   const notes = s.notes ?? [];
+  const tier = s.source_tier ?? null;
+
+  const handleSetSourceTier = useCallback(
+    async (value: 'primary' | 'secondary' | null) => {
+      if (!onSourceTierChange) return;
+      const next = tier === value ? null : value;
+      setUpdatingTier(true);
+      try {
+        await onSourceTierChange(s.id, next);
+      } finally {
+        setUpdatingTier(false);
+      }
+    },
+    [onSourceTierChange, s.id, tier]
+  );
 
   const handleAddNote = useCallback(async () => {
     const trimmed = newNoteContent.trim();
@@ -157,8 +196,98 @@ function SavedLinkCard({
             >
               {s.url}
             </a>
+            {(s.ai_summary || (s.ai_key_facts && s.ai_key_facts.length > 0) || (s.extracted_facts && (s.extracted_facts.summary || (s.extracted_facts.key_claims && s.extracted_facts.key_claims.length > 0)))) && (
+              <div className="mt-2 pt-2 border-t border-gray-100 text-xs">
+                {s.ai_summary && (
+                  <p className="text-gray-600 mb-1 line-clamp-3 font-medium">{s.ai_summary}</p>
+                )}
+                {!s.ai_summary && s.extracted_facts?.summary && (
+                  <p className="text-gray-600 mb-1 line-clamp-2">{s.extracted_facts.summary}</p>
+                )}
+                {s.ai_key_facts && s.ai_key_facts.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyClaims((v) => !v)}
+                      className="font-mono text-emerald-700 hover:underline"
+                    >
+                      {showKeyClaims ? 'Hide' : 'Key facts'} ({s.ai_key_facts.length})
+                    </button>
+                    {showKeyClaims && (
+                      <ul className="list-disc pl-4 mt-1 text-gray-600 space-y-0.5">
+                        {s.ai_key_facts.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+                {!(s.ai_key_facts && s.ai_key_facts.length > 0) && s.extracted_facts?.key_claims && s.extracted_facts.key_claims.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowKeyClaims((v) => !v)}
+                      className="font-mono text-emerald-700 hover:underline"
+                    >
+                      {showKeyClaims ? 'Hide' : 'Key claims'} ({s.extracted_facts.key_claims.length})
+                    </button>
+                    {showKeyClaims && (
+                      <ul className="list-disc pl-4 mt-1 text-gray-600 space-y-0.5">
+                        {s.extracted_facts.key_claims.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
+            {onSourceTierChange && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleSetSourceTier('primary')}
+                  disabled={updatingTier}
+                  className={`min-w-[28px] h-7 rounded font-mono text-xs font-semibold hover:bg-gray-100 ${
+                    tier === 'primary' ? 'bg-red-100 text-red-800 ring-1 ring-red-300' : 'text-gray-500'
+                  }`}
+                  title="Primary source"
+                >
+                  P
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetSourceTier('secondary')}
+                  disabled={updatingTier}
+                  className={`min-w-[28px] h-7 rounded font-mono text-xs font-semibold hover:bg-gray-100 ${
+                    tier === 'secondary' ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-300' : 'text-gray-500'
+                  }`}
+                  title="Secondary source"
+                >
+                  S
+                </button>
+              </>
+            )}
+            {caseId && onExtract && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setExtracting(true);
+                  try {
+                    await onExtract(s.id);
+                  } finally {
+                    setExtracting(false);
+                  }
+                }}
+                disabled={extracting}
+                className="p-1 rounded hover:bg-gray-100 text-gray-500 disabled:opacity-50"
+                title="Extract key facts"
+              >
+                {extracting ? <Loader2 className="h-5 w-5 animate-spin" /> : <FileText className="h-5 w-5" />}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setShowNotes((v) => !v)}
@@ -214,7 +343,7 @@ function SavedLinkCard({
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <p className="text-xs text-emerald-700 font-mono font-semibold mb-1">NOTE {index + 1}</p>
-                          <p className="text-sm text-gray-900 whitespace-pre-wrap break-words">{n.content}</p>
+                          <span className="text-sm text-gray-900 whitespace-pre-wrap break-words block">{linkifyText(n.content)}</span>
                           <p className="text-xs text-gray-500 font-mono mt-2">
                             {formatDistanceToNow(new Date(n.created_at), { addSuffix: true }).toUpperCase()}
                           </p>
@@ -243,12 +372,14 @@ function SavedLinkCard({
   );
 }
 
+/** Detect if a string is a URL (for linkify parts; avoids global-regex state). */
+const isUrlPart = (s: string) => /^https?:\/\//.test(s);
+
 const linkifyText = (text: string) => {
   const urlRegex = /(https?:\/\/[^\s]+)/g;
   const parts = text.split(urlRegex);
-
   return parts.map((part, index) => {
-    if (urlRegex.test(part)) {
+    if (isUrlPart(part)) {
       return (
         <a
           key={index}
@@ -282,6 +413,10 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [deletingAttachmentId, setDeletingAttachmentId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [manualTitle, setManualTitle] = useState('');
+  const [manualUrl, setManualUrl] = useState('');
+  const [manualSnippet, setManualSnippet] = useState('');
+  const [manualSaving, setManualSaving] = useState(false);
 
   const fetchSaved = useCallback(async () => {
     try {
@@ -342,7 +477,15 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
           const res = await fetch('/api/saved', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source, url, title: title ?? null, snippet: snippet ?? null, captured_at: captured_at ?? null, query_id: queryId }),
+            body: JSON.stringify({
+              source,
+              url,
+              title: title ?? null,
+              snippet: snippet ?? null,
+              captured_at: captured_at ?? null,
+              query_id: queryId,
+              case_id: caseId ?? null,
+            }),
           });
           if (!res.ok) {
             const errBody = await res.json().catch(() => ({}));
@@ -350,6 +493,8 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
             throw new Error('Failed to save');
           }
           toast.success('Saved');
+          // Refetch after a few seconds so auto-extracted key facts appear without leaving the tab
+          setTimeout(() => fetchSaved(), 5000);
         }
         await fetchSaved();
       } catch (e) {
@@ -357,7 +502,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
         toast.error(saved ? 'Failed to remove' : 'Failed to save');
       }
     },
-    [isSaved, fetchSaved, queryId]
+    [isSaved, fetchSaved, queryId, caseId]
   );
 
   // Archive bookmarks: only show as saved for current query + case (no bleed to other queries).
@@ -405,6 +550,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
             throw new Error('Failed to save');
           }
           toast.success('Saved');
+          setTimeout(() => fetchSaved(), 5000);
         }
         await fetchSaved();
       } catch (e) {
@@ -582,6 +728,11 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
 
   const archiveResults = results.filter((r) => r.source === 'wayback');
   const searchResultsFromApi = results.filter((r) => r.source === 'search');
+  // Manual entries are saved_links with placeholder url; they appear in the Saved tab with full buttons.
+  const manualEntryCount = useMemo(
+    () => scopedSavedLinks.filter((s) => typeof s.url === 'string' && s.url.startsWith('#manual-')).length,
+    [scopedSavedLinks]
+  );
   const discoveryQueries: QueryWithCategory[] =
     rawInput && rawInput.trim()
       ? generateMockSearchQueries(rawInput.trim(), detectInputType(rawInput))
@@ -694,6 +845,10 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
         <TabsTrigger value="saved" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <Bookmark className="hidden sm:inline h-4 w-4 mr-2" />
           SAVED ({scopedSavedLinks.length})
+        </TabsTrigger>
+        <TabsTrigger value="manual" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <PenLine className="hidden sm:inline h-4 w-4 mr-2" />
+          MANUAL ENTRY ({manualEntryCount})
         </TabsTrigger>
       </TabsList>
 
@@ -1332,10 +1487,165 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                   }
                 }}
                 onNoteSaved={fetchSaved}
+                onSourceTierChange={async (savedLinkId, source_tier) => {
+                  try {
+                    const res = await fetch('/api/saved', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ id: savedLinkId, source_tier }),
+                    });
+                    if (!res.ok) {
+                      const errBody = await res.json().catch(() => ({}));
+                      if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] PATCH source_tier failed', res.status, errBody);
+                      throw new Error((errBody && typeof errBody.error === 'string') ? errBody.error : 'Failed to update');
+                    }
+                    toast.success(source_tier ? `Marked as ${source_tier} source` : 'Source tier cleared');
+                    await fetchSaved();
+                  } catch (e) {
+                    if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] source_tier error', e.message);
+                    toast.error(e instanceof Error ? e.message : 'Failed to update');
+                  }
+                }}
+                caseId={caseId}
+                onExtract={
+                  caseId
+                    ? async (savedLinkId) => {
+                        const controller = new AbortController();
+                        const timeoutId = setTimeout(() => controller.abort(), 50_000);
+                        try {
+                          const res = await fetch(`/api/cases/${caseId}/saved-links/${savedLinkId}/extract`, {
+                            method: 'POST',
+                            signal: controller.signal,
+                          });
+                          clearTimeout(timeoutId);
+                          const data = await res.json().catch(() => ({}));
+                          if (data.ok) {
+                            let analyzeOk = false;
+                            let analyzeError: string | null = null;
+                            try {
+                              const ac = new AbortController();
+                              const at = setTimeout(() => ac.abort(), 35_000);
+                              const aRes = await fetch(`/api/cases/${caseId}/saved-links/${savedLinkId}/analyze`, {
+                                method: 'POST',
+                                signal: ac.signal,
+                              });
+                              clearTimeout(at);
+                              const aData = await aRes.json().catch(() => ({}));
+                              if (aRes.ok && aData.ok) {
+                                analyzeOk = true;
+                              } else if (!aRes.ok && typeof aData?.error === 'string') {
+                                analyzeError = aData.error;
+                              }
+                            } catch {
+                              // fall back to extract-only success
+                            }
+                            await fetchSaved();
+                            if (analyzeOk) {
+                              toast.success('Summary and key facts updated');
+                            } else if (analyzeError) {
+                              toast.error(analyzeError);
+                            } else {
+                              toast.success('Key facts extracted');
+                            }
+                          } else {
+                            toast.error(data.error ?? 'Extraction failed');
+                          }
+                        } catch (e) {
+                          clearTimeout(timeoutId);
+                          if (e instanceof Error && e.name === 'AbortError') {
+                            toast.error('Request timed out. The site may be slow or rate-limiting. Try again later.');
+                          } else {
+                            if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] extract error', e.message);
+                            toast.error('Extraction failed');
+                          }
+                        }
+                      }
+                    : undefined
+                }
               />
             ))}
           </div>
         )}
+      </TabsContent>
+
+      <TabsContent value="manual" className="space-y-3 mt-4">
+        <Card className="bg-white border-emerald-200 shadow-sm">
+          <CardContent className="p-4 space-y-4">
+            <p className="text-emerald-700 font-mono text-sm font-semibold">Add an entry to this query</p>
+            <p className="text-gray-600 text-xs font-mono">
+              Add an entry to this query. It will appear in the Saved tab with the same buttons (notes, source tier, extract, remove).
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="manual-entry-title" className="text-emerald-700 font-mono text-sm">Title</Label>
+              <Input
+                id="manual-entry-title"
+                placeholder="Short title for this entry"
+                value={manualTitle}
+                onChange={(e) => setManualTitle(e.target.value)}
+                className="border-emerald-200 font-mono"
+                disabled={manualSaving}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="manual-entry-url" className="text-emerald-700 font-mono text-sm">URL (optional)</Label>
+              <Input
+                id="manual-entry-url"
+                placeholder="https://..."
+                value={manualUrl}
+                onChange={(e) => setManualUrl(e.target.value)}
+                className="border-emerald-200 font-mono"
+                disabled={manualSaving}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="manual-entry-snippet" className="text-emerald-700 font-mono text-sm">Snippet / notes (optional)</Label>
+              <Textarea
+                id="manual-entry-snippet"
+                placeholder="Summary or quote"
+                value={manualSnippet}
+                onChange={(e) => setManualSnippet(e.target.value)}
+                className="border-emerald-200 font-mono min-h-[80px]"
+                disabled={manualSaving}
+              />
+            </div>
+            <Button
+              type="button"
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-mono"
+              disabled={manualSaving || !manualTitle.trim()}
+              onClick={async () => {
+                setManualSaving(true);
+                try {
+                  const url = manualUrl.trim() || `#manual-${crypto.randomUUID()}`;
+                  const res = await fetch('/api/saved', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      source: 'query',
+                      url,
+                      title: manualTitle.trim() || null,
+                      snippet: manualSnippet.trim() || null,
+                      query_id: queryId,
+                      case_id: caseId ?? null,
+                    }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.error || 'Failed to add entry');
+                  toast.success('Entry added — see Saved tab');
+                  setManualTitle('');
+                  setManualUrl('');
+                  setManualSnippet('');
+                  fetchSaved();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Failed to add entry');
+                } finally {
+                  setManualSaving(false);
+                }
+              }}
+            >
+              {manualSaving ? 'Adding...' : 'Add entry'}
+            </Button>
+          </CardContent>
+        </Card>
       </TabsContent>
     </Tabs>
   );

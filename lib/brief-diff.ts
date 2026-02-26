@@ -44,8 +44,8 @@ export function computeChangesSinceLastVersion(
   const nextTl = next.working_timeline ?? [];
   const maxTl = Math.max(prevTl.length, nextTl.length);
   for (let i = 0; i < maxTl; i++) {
-    const p = prevTl[i] as Record<string, unknown> | undefined;
-    const n = nextTl[i] as Record<string, unknown> | undefined;
+    const p = prevTl[i] as unknown as Record<string, unknown> | undefined;
+    const n = nextTl[i] as unknown as Record<string, unknown> | undefined;
     if (!p && n) {
       const event = String((n as Record<string, unknown>).event ?? '').slice(0, 60);
       out.push({
@@ -73,15 +73,15 @@ export function computeChangesSinceLastVersion(
   // Key Entities (by name + type)
   const prevEntities = new Map<string, Record<string, unknown>>();
   for (const e of prev.key_entities ?? []) {
-    const o = e as Record<string, unknown>;
+    const o = e as unknown as Record<string, unknown>;
     prevEntities.set(entityKey(o), o);
   }
   const nextEntities = new Map<string, Record<string, unknown>>();
   for (const e of next.key_entities ?? []) {
-    const o = e as Record<string, unknown>;
+    const o = e as unknown as Record<string, unknown>;
     nextEntities.set(entityKey(o), o);
   }
-  for (const [k] of nextEntities) {
+  for (const k of Array.from(nextEntities.keys())) {
     if (!prevEntities.has(k)) {
       out.push({
         section: 'key_entities',
@@ -90,7 +90,7 @@ export function computeChangesSinceLastVersion(
       });
     }
   }
-  for (const [k] of prevEntities) {
+  for (const k of Array.from(prevEntities.keys())) {
     if (!nextEntities.has(k)) {
       out.push({
         section: 'key_entities',
@@ -103,17 +103,17 @@ export function computeChangesSinceLastVersion(
   // Contradictions (by issue)
   const prevIssues = new Map<string, Record<string, unknown>>();
   for (const c of prev.contradictions_tensions ?? []) {
-    const o = c as Record<string, unknown>;
+    const o = c as unknown as Record<string, unknown>;
     const issue = String(o.issue ?? '').trim();
     if (issue) prevIssues.set(issue, o);
   }
   const nextIssues = new Map<string, Record<string, unknown>>();
   for (const c of next.contradictions_tensions ?? []) {
-    const o = c as Record<string, unknown>;
+    const o = c as unknown as Record<string, unknown>;
     const issue = String(o.issue ?? '').trim();
     if (issue) nextIssues.set(issue, o);
   }
-  for (const [issue] of nextIssues) {
+  for (const issue of Array.from(nextIssues.keys())) {
     if (!prevIssues.has(issue)) {
       out.push({
         section: 'contradictions_tensions',
@@ -128,7 +128,7 @@ export function computeChangesSinceLastVersion(
       });
     }
   }
-  for (const [issue] of prevIssues) {
+  for (const issue of Array.from(prevIssues.keys())) {
     if (!nextIssues.has(issue)) {
       out.push({
         section: 'contradictions_tensions',
@@ -138,94 +138,18 @@ export function computeChangesSinceLastVersion(
     }
   }
 
-  // Hypotheses (by statement)
-  const prevHyp = new Map<string, Record<string, unknown>>();
-  for (const h of prev.hypotheses ?? []) {
-    const o = h as Record<string, unknown>;
-    const st = String(o.statement ?? '').trim();
-    if (st) prevHyp.set(st, o);
-  }
-  const nextHyp = new Map<string, Record<string, unknown>>();
-  for (const h of next.hypotheses ?? []) {
-    const o = h as Record<string, unknown>;
-    const st = String(o.statement ?? '').trim();
-    if (st) nextHyp.set(st, o);
-  }
-  for (const [st] of nextHyp) {
-    if (!prevHyp.has(st)) {
-      out.push({
-        section: 'hypotheses',
-        kind: 'added',
-        label: `Hypothesis: added '${st.slice(0, 50)}${st.length > 50 ? '…' : ''}'`,
-      });
-    } else if (JSON.stringify(prevHyp.get(st)) !== JSON.stringify(nextHyp.get(st))) {
-      out.push({
-        section: 'hypotheses',
-        kind: 'modified',
-        label: `Hypothesis: modified '${st.slice(0, 50)}${st.length > 50 ? '…' : ''}'`,
-      });
-    }
-  }
-  for (const [st] of prevHyp) {
-    if (!nextHyp.has(st)) {
-      out.push({
-        section: 'hypotheses',
-        kind: 'removed',
-        label: `Hypothesis: removed '${st.slice(0, 50)}${st.length > 50 ? '…' : ''}'`,
-      });
-    }
-  }
-
-  // Critical Gaps (by missing_item)
-  const prevGaps = new Map<string, Record<string, unknown>>();
-  for (const g of prev.critical_gaps ?? []) {
-    const o = g as Record<string, unknown>;
-    const m = String(o.missing_item ?? '').trim();
-    if (m) prevGaps.set(m, o);
-  }
-  const nextGaps = new Map<string, Record<string, unknown>>();
-  for (const g of next.critical_gaps ?? []) {
-    const o = g as Record<string, unknown>;
-    const m = String(o.missing_item ?? '').trim();
-    if (m) nextGaps.set(m, o);
-  }
-  for (const [m] of nextGaps) {
-    if (!prevGaps.has(m)) {
-      out.push({
-        section: 'critical_gaps',
-        kind: 'added',
-        label: `Critical gap: added '${m.slice(0, 50)}${m.length > 50 ? '…' : ''}'`,
-      });
-    } else if (JSON.stringify(prevGaps.get(m)) !== JSON.stringify(nextGaps.get(m))) {
-      out.push({
-        section: 'critical_gaps',
-        kind: 'modified',
-        label: `Critical gap: modified '${m.slice(0, 50)}${m.length > 50 ? '…' : ''}'`,
-      });
-    }
-  }
-  for (const [m] of prevGaps) {
-    if (!nextGaps.has(m)) {
-      out.push({
-        section: 'critical_gaps',
-        kind: 'removed',
-        label: `Critical gap: removed '${m.slice(0, 50)}${m.length > 50 ? '…' : ''}'`,
-      });
-    }
-  }
-
   // Verification Tasks (by task string)
   const prevTasks = new Set<string>();
   for (const t of prev.verification_tasks ?? []) {
-    const task = String((t as Record<string, unknown>).task ?? '').trim();
+    const task = String((t as unknown as Record<string, unknown>).task ?? '').trim();
     if (task) prevTasks.add(task);
   }
   const nextTasks = new Set<string>();
   for (const t of next.verification_tasks ?? []) {
-    const task = String((t as Record<string, unknown>).task ?? '').trim();
+    const task = String((t as unknown as Record<string, unknown>).task ?? '').trim();
     if (task) nextTasks.add(task);
   }
-  for (const task of nextTasks) {
+  for (const task of Array.from(nextTasks)) {
     if (!prevTasks.has(task)) {
       out.push({
         section: 'verification_tasks',
@@ -234,50 +158,12 @@ export function computeChangesSinceLastVersion(
       });
     }
   }
-  for (const task of prevTasks) {
+  for (const task of Array.from(prevTasks)) {
     if (!nextTasks.has(task)) {
       out.push({
         section: 'verification_tasks',
         kind: 'removed',
         label: `Verification task: removed '${task.slice(0, 50)}${task.length > 50 ? '…' : ''}'`,
-      });
-    }
-  }
-
-  // Evidence Strength (by theme)
-  const prevEs = new Map<string, Record<string, unknown>>();
-  for (const e of prev.evidence_strength ?? []) {
-    const o = e as Record<string, unknown>;
-    const theme = String(o.theme ?? '').trim();
-    if (theme) prevEs.set(theme, o);
-  }
-  const nextEs = new Map<string, Record<string, unknown>>();
-  for (const e of next.evidence_strength ?? []) {
-    const o = e as Record<string, unknown>;
-    const theme = String(o.theme ?? '').trim();
-    if (theme) nextEs.set(theme, o);
-  }
-  for (const [theme] of nextEs) {
-    if (!prevEs.has(theme)) {
-      out.push({
-        section: 'evidence_strength',
-        kind: 'added',
-        label: `Evidence strength: added theme '${theme.slice(0, 40)}${theme.length > 40 ? '…' : ''}'`,
-      });
-    } else if (JSON.stringify(prevEs.get(theme)) !== JSON.stringify(nextEs.get(theme))) {
-      out.push({
-        section: 'evidence_strength',
-        kind: 'modified',
-        label: `Evidence strength: modified theme '${theme.slice(0, 40)}${theme.length > 40 ? '…' : ''}'`,
-      });
-    }
-  }
-  for (const [theme] of prevEs) {
-    if (!nextEs.has(theme)) {
-      out.push({
-        section: 'evidence_strength',
-        kind: 'removed',
-        label: `Evidence strength: removed theme '${theme.slice(0, 40)}${theme.length > 40 ? '…' : ''}'`,
       });
     }
   }

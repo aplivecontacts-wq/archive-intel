@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { title, tags = [] } = body;
+    const { title, tags = [], objective } = body;
 
     if (!title) {
       return NextResponse.json(
@@ -47,9 +47,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const insertPayload: Record<string, unknown> = { title, tags, user_id: userId };
+    if (objective !== undefined) {
+      insertPayload.objective = typeof objective === 'string' ? objective.trim() || null : null;
+    }
+
     const { data, error } = await (supabaseServer
       .from('cases') as any)
-      .insert({ title, tags, user_id: userId })
+      .insert(insertPayload as Record<string, unknown>)
       .select()
       .single();
 

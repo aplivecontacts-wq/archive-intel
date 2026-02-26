@@ -12,7 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Globe, User, Quote, Loader2, FileText, Trash2 } from 'lucide-react';
+import { Globe, User, Quote, Loader2, FileText, Trash2, Pencil } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 
@@ -31,9 +31,10 @@ interface QueryListProps {
   selectedQueryId?: string;
   onSelectQuery: (queryId: string) => void;
   onQueryDeleted?: () => void;
+  onEditQuery?: (query: Query) => void;
 }
 
-export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDeleted }: QueryListProps) {
+export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDeleted, onEditQuery }: QueryListProps) {
   const [notesMap, setNotesMap] = useState<Record<string, boolean>>({});
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [queryToDelete, setQueryToDelete] = useState<string | null>(null);
@@ -165,6 +166,19 @@ export function QueryList({ queries, selectedQueryId, onSelectQuery, onQueryDele
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {hasNote && (
                         <FileText className="h-4 w-4 text-emerald-600" />
+                      )}
+                      {onEditQuery && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onEditQuery(query);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-emerald-50 rounded text-emerald-600 hover:text-emerald-700"
+                          title="Edit query"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
                       )}
                       <button
                         type="button"

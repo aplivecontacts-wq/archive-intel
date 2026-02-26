@@ -109,6 +109,7 @@ export type SavedLinkWithNotesForPdf = {
   source: string;
   url: string;
   title: string | null;
+  source_tier?: 'primary' | 'secondary' | null;
   notes: { content: string; created_at: string }[];
 };
 
@@ -304,12 +305,25 @@ export function buildBriefPdf(
 
   // 7) Evidence Strength Matrix (optional)
   const evidenceStrength = briefJson.evidence_strength;
+  const evidenceIndexForPdf = briefJson.evidence_index ?? {};
   if (evidenceStrength && Array.isArray(evidenceStrength) && evidenceStrength.length > 0) {
     y = addSectionTitle(doc, 'Evidence Strength Matrix', y);
     for (const es of evidenceStrength) {
       const counts = `${es.results_count ?? 0} results, ${es.saved_links_count ?? 0} saved links, ${es.wayback_count ?? 0} wayback, ${es.note_count ?? 0} notes`;
-      const line = `${es.theme || ''} — ${String(es.strength_rating || '').toUpperCase()} (${counts}). ${es.corroboration_estimate || ''}`.trim();
+      const pCount = es.primary_sources_count ?? 0;
+      const sCount = es.secondary_sources_count ?? 0;
+      const tierLabel = (pCount > 0 || sCount > 0) ? ` [${pCount}P, ${sCount}S]` : '';
+      const line = `${es.theme || ''} — ${String(es.strength_rating || '').toUpperCase()} (${counts})${tierLabel}. ${es.corroboration_estimate || ''}`.trim();
       y = addWrappedText(doc, line, MARGIN, y, 10);
+      if (Array.isArray(es.supporting_refs) && es.supporting_refs.length > 0) {
+        const refLabels = es.supporting_refs.map((id: string) => {
+          const entry = evidenceIndexForPdf[id];
+          const tier = entry && typeof entry === 'object' && (entry as { source_tier?: string }).source_tier;
+          return tier === 'primary' ? `${id} [P]` : tier === 'secondary' ? `${id} [S]` : id;
+        });
+        y = addWrappedText(doc, `Refs: ${refLabels.join(', ')}`, MARGIN, y, 9);
+        y += 0.5;
+      }
       y += 1;
     }
   }
@@ -361,6 +375,215 @@ export function buildBriefPdf(
     }
   }
 
+  // 9b) Collapse Tests (optional, Phase 11.1)
+  const collapseTests = briefJson.collapse_tests;
+  if (collapseTests && Array.isArray(collapseTests) && collapseTests.length > 0) {
+    y += SECTION_GAP;
+    y = addSectionTitle(doc, 'Collapse Tests', y, true);
+    for (const t of collapseTests) {
+      y = ensureNewPage(doc, y);
+      y = addWrappedText(doc, `Claim/Hypothesis: ${t.claim_or_hypothesis || ''}`, MARGIN, y, 10);
+      y += 1;
+      if (Array.isArray(t.critical_assumptions) && t.critical_assumptions.length > 0) {
+        y = addWrappedText(doc, 'Critical assumptions:', MARGIN, y, 9);
+        for (const a of t.critical_assumptions) {
+          y = addWrappedText(doc, `• ${a}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (Array.isArray(t.single_points_of_failure) && t.single_points_of_failure.length > 0) {
+        y = addWrappedText(doc, 'Single points of failure:', MARGIN, y, 9);
+        for (const s of t.single_points_of_failure) {
+          y = addWrappedText(doc, `• ${s}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (Array.isArray(t.what_would_falsify) && t.what_would_falsify.length > 0) {
+        y = addWrappedText(doc, 'What would falsify:', MARGIN, y, 9);
+        for (const w of t.what_would_falsify) {
+          y = addWrappedText(doc, `• ${w}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      y = addWrappedText(doc, `Highest leverage next step: ${t.highest_leverage_next_step || ''}`, MARGIN, y, 9);
+      y += 1;
+      if (Array.isArray(t.supporting_refs) && t.supporting_refs.length > 0) {
+        y = addWrappedText(doc, `Refs: ${t.supporting_refs.join(', ')}`, MARGIN, y, 9);
+        y += 0.5;
+      }
+      y += 2;
+    }
+  }
+
+  // 9c) Incentive Matrix (optional, Phase 11.2)
+  const incentiveMatrix = briefJson.incentive_matrix;
+  if (incentiveMatrix && Array.isArray(incentiveMatrix) && incentiveMatrix.length > 0) {
+    y += SECTION_GAP;
+    y = addSectionTitle(doc, 'Incentive Matrix', y, true);
+    for (const m of incentiveMatrix) {
+      y = ensureNewPage(doc, y);
+      y = addWrappedText(doc, `${m.actor || ''} — ${m.role || ''}`, MARGIN, y, 10);
+      y += 1;
+      if (Array.isArray(m.narrative_a_incentives) && m.narrative_a_incentives.length > 0) {
+        y = addWrappedText(doc, 'Narrative A incentives:', MARGIN, y, 9);
+        for (const a of m.narrative_a_incentives) {
+          y = addWrappedText(doc, `• ${a}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (Array.isArray(m.narrative_b_incentives) && m.narrative_b_incentives.length > 0) {
+        y = addWrappedText(doc, 'Narrative B incentives:', MARGIN, y, 9);
+        for (const b of m.narrative_b_incentives) {
+          y = addWrappedText(doc, `• ${b}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (Array.isArray(m.exposure_if_false) && m.exposure_if_false.length > 0) {
+        y = addWrappedText(doc, 'Exposure if false:', MARGIN, y, 9);
+        for (const e of m.exposure_if_false) {
+          y = addWrappedText(doc, `• ${e}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (Array.isArray(m.supporting_refs) && m.supporting_refs.length > 0) {
+        y = addWrappedText(doc, `Refs: ${m.supporting_refs.join(', ')}`, MARGIN, y, 9);
+        y += 0.5;
+      }
+      y += 2;
+    }
+  }
+
+  // 9) Evidence & brief quality (one block: credibility, evidence summary, entity summary, integrity, network, coherence)
+  const hasCredibility = typeof briefJson.source_credibility_summary === 'string' && briefJson.source_credibility_summary.trim() !== '';
+  const esp = briefJson.evidence_summary_panel;
+  const entityPanel = briefJson.entity_summary_panel;
+  const integrityScore = briefJson.integrity_score;
+  const evidenceNetwork = briefJson.evidence_network;
+  const coherenceAlerts = briefJson.coherence_alerts;
+  const hasEsp = esp && typeof esp === 'object' && esp.totals;
+  const hasEntityPanel = entityPanel && typeof entityPanel === 'object' && Array.isArray(entityPanel.top_entities) && entityPanel.top_entities.length > 0;
+  const hasIntegrity = integrityScore && typeof integrityScore === 'object' && typeof integrityScore.score_0_100 === 'number';
+  const hasNetwork = evidenceNetwork && typeof evidenceNetwork === 'object' && (
+    ((evidenceNetwork.central_nodes ?? []).length > 0) || ((evidenceNetwork.isolated_nodes ?? []).length > 0) || ((evidenceNetwork.single_point_failures ?? []).length > 0)
+  );
+  const hasCoherence = coherenceAlerts && Array.isArray(coherenceAlerts) && coherenceAlerts.length > 0;
+  if (hasCredibility || hasEsp || hasEntityPanel || hasIntegrity || hasNetwork || hasCoherence) {
+    y += SECTION_GAP;
+    y = addSectionTitle(doc, 'Evidence & brief quality', y, true);
+    if (hasCredibility) {
+      y = addWrappedText(doc, briefJson.source_credibility_summary!.trim(), MARGIN, y, 10);
+      y += 2;
+    }
+    if (hasEsp) {
+      const t = esp!.totals;
+      const intro = (esp as { intro?: string }).intro;
+      if (intro) {
+        y = addWrappedText(doc, intro, MARGIN, y, 10);
+        y += 1;
+      }
+      y = addWrappedText(doc, `Totals: ${t.results ?? 0} results, ${t.saved_links ?? 0} saved links, ${t.notes ?? 0} notes, ${t.wayback_results ?? 0} wayback.`, MARGIN, y, 10);
+      if (Array.isArray(esp!.top_sources) && esp!.top_sources.length > 0) {
+        y += 2;
+        y = addWrappedText(doc, 'Top sources: ' + esp!.top_sources.slice(0, 5).map((s: { label: string; count: number }) => `${s.label} (${s.count})`).join(', '), MARGIN, y, 10);
+      }
+      if (Array.isArray(esp!.coverage_notes) && esp!.coverage_notes.length > 0) {
+        y += 2;
+        y = addWrappedText(doc, esp!.coverage_notes.join(' '), MARGIN, y, 10);
+      }
+      y += 2;
+    }
+    if (hasEntityPanel) {
+      const intro = (entityPanel as { intro?: string }).intro;
+      if (intro) {
+        y = addWrappedText(doc, intro, MARGIN, y, 10);
+        y += 1;
+      }
+      const lines = entityPanel!.top_entities!.map((e: { name: string; type: string; mention_count: number }) => `${e.name} (${e.type}): ${e.mention_count}`);
+      y = addWrappedText(doc, lines.join('; '), MARGIN, y, 10);
+      if (Array.isArray(entityPanel!.notable_connections) && entityPanel!.notable_connections.length > 0) {
+        y += 2;
+        y = addWrappedText(doc, entityPanel!.notable_connections.join(' '), MARGIN, y, 10);
+      }
+      y += 2;
+    }
+    if (hasIntegrity) {
+      y = addWrappedText(doc, `Score: ${integrityScore!.score_0_100}/100 — Grade: ${integrityScore!.grade ?? ''}`, MARGIN, y, 10);
+      y += 1;
+      if (Array.isArray(integrityScore!.drivers) && integrityScore!.drivers.length > 0) {
+        y = addWrappedText(doc, 'Drivers:', MARGIN, y, 9);
+        for (const d of integrityScore!.drivers) {
+          y = addWrappedText(doc, `• ${d}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (Array.isArray(integrityScore!.weak_points) && integrityScore!.weak_points.length > 0) {
+        y = addWrappedText(doc, 'Weak points:', MARGIN, y, 9);
+        for (const w of integrityScore!.weak_points) {
+          y = addWrappedText(doc, `• ${w}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      y += 2;
+    }
+    if (hasNetwork) {
+      const centralNodes = evidenceNetwork!.central_nodes ?? [];
+      const isolatedNodes = evidenceNetwork!.isolated_nodes ?? [];
+      const singlePointFailures = evidenceNetwork!.single_point_failures ?? [];
+      if (centralNodes.length > 0) {
+        y = addWrappedText(doc, 'Central nodes (high mention count):', MARGIN, y, 9);
+        for (const n of centralNodes) {
+          y = addWrappedText(doc, `• ${n.id} — ${n.mention_count} refs${n.type ? ` (${n.type})` : ''}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (isolatedNodes.length > 0) {
+        y = addWrappedText(doc, 'Isolated nodes (mention_count = 1):', MARGIN, y, 9);
+        for (const n of isolatedNodes) {
+          y = addWrappedText(doc, `• ${n.id}${n.type ? ` (${n.type})` : ''}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      if (singlePointFailures.length > 0) {
+        y = addWrappedText(doc, 'Single-point failures:', MARGIN, y, 9);
+        for (const s of singlePointFailures) {
+          const deps = Array.isArray(s.depends_on_ids) ? s.depends_on_ids.join(', ') : '';
+          y = addWrappedText(doc, `• ${s.claim_area} → depends on ${deps}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 0.5;
+      }
+      y += 2;
+    }
+    if (hasCoherence) {
+      for (const a of coherenceAlerts!) {
+        y = ensureNewPage(doc, y);
+        y = addWrappedText(doc, `[${(a.severity ?? '').toUpperCase()}] ${a.alert ?? ''}`, MARGIN, y, 10);
+        y = addWrappedText(doc, a.why_it_matters ?? '', MARGIN, y, 9);
+        y += 0.5;
+        if (Array.isArray(a.affected_sections) && a.affected_sections.length > 0) {
+          y = addWrappedText(doc, `Sections: ${a.affected_sections.join(', ')}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        if (Array.isArray(a.related_evidence_ids) && a.related_evidence_ids.length > 0) {
+          y = addWrappedText(doc, `Refs: ${a.related_evidence_ids.join(', ')}`, MARGIN, y, 9);
+          y += 0.5;
+        }
+        y += 1.5;
+      }
+      y += 2;
+    }
+  }
+
   // 10) Saved link notes (evidence) — so nothing is missed
   if (savedLinksWithNotes && savedLinksWithNotes.length > 0) {
     y += SECTION_GAP;
@@ -375,7 +598,8 @@ export function buildBriefPdf(
     y += 2;
     for (const link of savedLinksWithNotes) {
       y = ensureNewPage(doc, y);
-      const header = `${link.source} · ${link.title || link.url || ''}`.trim();
+      const tierLabel = link.source_tier === 'primary' ? ' [Primary]' : link.source_tier === 'secondary' ? ' [Secondary]' : '';
+      const header = `${link.source}${tierLabel} · ${link.title || link.url || ''}`.trim();
       y = addWrappedText(doc, header, MARGIN, y, 10);
       y = addWrappedText(doc, link.url || '', MARGIN, y, 9);
       y += 1;

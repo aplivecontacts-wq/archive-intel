@@ -57,7 +57,7 @@ export async function GET(
       : '';
 
     const { data: savedRaw } = await (supabaseServer.from('saved_links') as any)
-      .select('id, source, url, title, captured_at, created_at')
+      .select('id, source, url, title, captured_at, source_tier, created_at')
       .eq('user_id', userId)
       .eq('case_id', caseId)
       .order('created_at', { ascending: false });
@@ -82,6 +82,7 @@ export async function GET(
       source: s.source,
       url: s.url,
       title: s.title,
+      source_tier: s.source_tier ?? null,
       notes: notesByLink[s.id as string] ?? [],
     }));
 

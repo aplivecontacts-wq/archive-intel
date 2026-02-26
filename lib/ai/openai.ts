@@ -56,11 +56,22 @@ function getOpenAIKey(): string {
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
+export type OpenAIUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+
+export type GenerateStructuredJsonResult<T> = {
+  data: T;
+  usage?: OpenAIUsage;
+};
+
 export async function generateStructuredJson<T = unknown>(
   systemPrompt: string,
   userContent: string,
   model = 'gpt-4o-mini'
-): Promise<T> {
+): Promise<GenerateStructuredJsonResult<T>> {
   const apiKey = getOpenAIKey();
   if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not configured. Add it to .env.local in the project root.');
@@ -92,14 +103,23 @@ export async function generateStructuredJson<T = unknown>(
 
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
   };
   const content = data?.choices?.[0]?.message?.content;
   if (!content) {
     throw new Error('OpenAI returned empty content');
   }
 
+  const usage: OpenAIUsage | undefined = data?.usage
+    ? {
+        prompt_tokens: data.usage.prompt_tokens ?? 0,
+        completion_tokens: data.usage.completion_tokens ?? 0,
+        total_tokens: data.usage.total_tokens ?? 0,
+      }
+    : undefined;
+
   try {
-    return JSON.parse(content) as T;
+    return { data: JSON.parse(content) as T, usage };
   } catch {
     throw new Error('OpenAI response was not valid JSON');
   }

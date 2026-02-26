@@ -82,8 +82,8 @@ export async function POST(request: NextRequest) {
       title: title ?? null,
       snippet: snippet ?? null,
       captured_at: captured_at ?? null,
-      query_id: isArchive ? (query_id ?? null) : (query_id ?? null),
-      case_id: isArchive ? (case_id ?? null) : null,
+      query_id: query_id ?? null,
+      case_id: case_id ?? null,
     };
 
     const tbl = supabaseServer.from('saved_links') as any;
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     let data;
     if (existing) {
       const { data: updated, error: updateErr } = await tbl
-        .update({ title: row.title, snippet: row.snippet, captured_at: row.captured_at, query_id: row.query_id })
+        .update({ title: row.title, snippet: row.snippet, captured_at: row.captured_at, query_id: row.query_id, case_id: row.case_id })
         .eq('id', existing.id)
         .select()
         .single();
@@ -133,6 +133,20 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: insertErr.message }, { status: 500 });
       }
       data = inserted;
+      // Auto-run extract key facts when a new link is saved with a case (so Saved tab shows key facts without a click).
+      const caseId = data?.case_id;
+      if (caseId && data?.id) {
+        const origin = request.nextUrl?.origin || '';
+        const cookie = request.headers.get('cookie');
+        const authz = request.headers.get('authorization');
+        const headers: Record<string, string> = {};
+        if (cookie) headers.cookie = cookie;
+        if (authz) headers.authorization = authz;
+        if (origin) {
+          const extractUrl = `${origin}/api/cases/${caseId}/saved-links/${data.id}/extract`;
+          fetch(extractUrl, { method: 'POST', cache: 'no-store', headers: Object.keys(headers).length ? headers : undefined }).catch(() => {});
+        }
+      }
     }
 
     return NextResponse.json({ saved: data }, { status: 201 });
@@ -143,6 +157,8 @@ export async function POST(request: NextRequest) {
   }
 }
 
+const SOURCE_TIER_VALUES = new Set(['primary', 'secondary', null]);
+
 export async function PATCH(request: NextRequest) {
   try {
     const { userId } = await auth();
@@ -151,13 +167,19 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, link_notes } = body;
+    const { id, link_notes, source_tier } = body;
 
     if (!id || typeof id !== 'string') {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
     }
     if (link_notes !== undefined && link_notes !== null && typeof link_notes !== 'string') {
       return NextResponse.json({ error: 'link_notes must be a string or null' }, { status: 400 });
+    }
+    if (source_tier !== undefined && !SOURCE_TIER_VALUES.has(source_tier)) {
+      return NextResponse.json(
+        { error: 'source_tier must be "primary", "secondary", or null' },
+        { status: 400 }
+      );
     }
 
     const { data: row, error: fetchError } = await (supabaseServer.from('saved_links') as any)
@@ -170,9 +192,19 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Not found or access denied' }, { status: 404 });
     }
 
-    const value = link_notes == null ? null : String(link_notes);
+    const updates: Record<string, unknown> = {};
+    if (link_notes !== undefined) {
+      updates.link_notes = link_notes == null ? null : String(link_notes);
+    }
+    if (source_tier !== undefined) {
+      updates.source_tier = source_tier;
+    }
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: 'Provide link_notes and/or source_tier to update' }, { status: 400 });
+    }
+
     const { data: updated, error } = await (supabaseServer.from('saved_links') as any)
-      .update({ link_notes: value })
+      .update(updates)
       .eq('id', id)
       .eq('user_id', userId)
       .select()
@@ -181,14 +213,14 @@ export async function PATCH(request: NextRequest) {
     if (error) {
       if (process.env.NODE_ENV === 'development') console.error('[api/saved] PATCH error:', error);
       const msg = (error as { message?: string }).message ?? String(error);
-      const hint = /does not exist|undefined column|link_notes/i.test(msg)
+      const hint = /does not exist|undefined column|link_notes|source_tier/i.test(msg)
         ? ' Run database migrations (e.g. supabase db push).'
         : '';
       return NextResponse.json({ error: msg + hint }, { status: 500 });
     }
     return NextResponse.json({ saved: updated });
   } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Failed to update saved link note';
+    const msg = error instanceof Error ? error.message : 'Failed to update saved link';
     if (process.env.NODE_ENV === 'development') console.error('[api/saved] PATCH catch:', error);
     return NextResponse.json({ error: msg }, { status: 500 });
   }

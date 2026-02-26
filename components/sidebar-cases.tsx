@@ -35,6 +35,7 @@ interface Case {
   id: string;
   title: string;
   tags: string[];
+  objective?: string | null;
   created_at: string;
 }
 
@@ -48,6 +49,7 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState('');
+  const [objective, setObjective] = useState('');
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [caseToDelete, setCaseToDelete] = useState<string | null>(null);
@@ -61,13 +63,17 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
       const response = await fetch('/api/cases', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: title.trim() }),
+        body: JSON.stringify({
+          title: title.trim(),
+          ...(objective.trim() ? { objective: objective.trim() } : {}),
+        }),
       });
 
       if (!response.ok) throw new Error('Failed to create case');
 
       toast.success('Case created successfully');
       setTitle('');
+      setObjective('');
       setOpen(false);
       onCaseCreated();
     } catch (error) {
@@ -160,6 +166,19 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="bg-white border-emerald-200 text-gray-900 placeholder:text-gray-400 font-mono"
+                  disabled={loading}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="case-objective" className="text-emerald-700 font-mono text-sm">
+                  OBJECTIVE (OPTIONAL)
+                </Label>
+                <Input
+                  id="case-objective"
+                  placeholder="What are you trying to find out or decide?"
+                  value={objective}
+                  onChange={(e) => setObjective(e.target.value)}
+                  className="bg-white border-emerald-200 text-gray-900 placeholder:text-gray-400 font-mono text-sm"
                   disabled={loading}
                 />
               </div>
