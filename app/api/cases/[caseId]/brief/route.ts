@@ -4,9 +4,15 @@ import { config } from 'dotenv';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { generateStructuredJson } from '@/lib/ai/openai';
+import { recordTokenUsage } from '@/lib/usage';
 import type { BriefJson } from '@/lib/ai/brief-schema';
 import { validateBriefJson, computeSourceCredibilitySummary } from '@/lib/ai/brief-schema';
 import { computeChangesSinceLastVersion } from '@/lib/brief-diff';
+import { computeIntegrityScore } from '@/lib/integrity-score';
+import { computeEvidenceNetwork } from '@/lib/evidence-network';
+import { deriveEvidenceStrengthCounts } from '@/lib/evidence-strength';
+import { computeCoherenceAlerts } from '@/lib/coherence-alerts';
+import { buildCaseEvidenceBundle } from '@/lib/evidence/normalize';
 
 // Load .env.local at request time (Next.js sometimes doesn't inject it in API route context)
 config({ path: path.join(process.cwd(), '.env.local'), override: true });
@@ -33,6 +39,8 @@ You evaluate evidence like an analyst preparing a defensible case memorandum.
 
 All output MUST be valid JSON matching the required schema.
 Return ONLY valid JSON. No markdown. No commentary.
+
+Prefer fewer, high-quality entries over padding to meet minimums. When evidence is thin, one well-supported entry per section is better than several weak or repetitive ones. Do not repeat the same phrasing across sections. Omit optional sections (threads, hypotheses, evidence_strength, critical_gaps) when the evidence does not meaningfully support them.
 
 CONFIDENTIAL — For investigative use only.
 
@@ -87,10 +95,8 @@ Surface these in:
 - executive_overview
 - verification_tasks
 
-4. WHAT WOULD DISPROVE (MANDATORY FALSIFICATION TEST)
-You MUST include at least one explicit falsification test in either:
-- contradictions_tensions, OR
-- verification_tasks.
+4. WHAT WOULD DISPROVE (FALSIFICATION TEST)
+When the case supports a testable interpretation, include at least one explicit falsification test in verification_tasks. If there is no clear interpretation to test, include at least one verification_task for the most important gap instead.
 
 A falsification test must follow this structure:
 - Identify a CURRENT working interpretation or conclusion (Y).
@@ -117,9 +123,7 @@ At least one task must:
 Do not output only confirmatory tasks.
 At least one must attempt to disprove the working narrative.
 
-verification_tasks must include BOTH:
-- At least one falsification test (as above), AND
-- Other verification tasks: gaps in documentation, unverified claims, evidence-gathering (research, obtain documents, investigate connections) as appropriate to the case. Output multiple verification_tasks—not only the single falsification one.
+Include 2–5 verification_tasks when the case warrants; one or two is fine when the case is narrow. At least one should be a falsification test when the case supports it. Add tasks for gaps, unverified claims, and evidence-gathering as appropriate.
 
 5. ANALYST TONE
 The executive_overview must read like a professional assessment:
@@ -154,28 +158,34 @@ Do NOT remove keys.
 Do NOT rename keys.
 
 ===============================
+EVERY ASPECT (MANDATORY)
+===============================
+
+Look at every aspect of the forensic brief. Before writing, consider each section: executive_overview, evidence_index, working_timeline, key_entities, contradictions_tensions, verification_tasks, and when evidence supports them — evidence_strength, hypotheses, critical_gaps, collapse_tests, incentive_matrix. For each aspect, decide what the evidence supports and fill it accordingly (or omit per the rules). Do not skip or overlook any part of the brief.
+
+===============================
 EVIDENCE MAPPING RULES (DO THIS FIRST — THEN FILL TIMELINE, ENTITIES, CONTRADICTIONS)
 ===============================
 
 Build evidence_index from the payload first. Use these IDs only (no fabrication):
 - payload.queries → one entry per query: id "q1", "q2", ... (1-based index); type "query"; description = normalized_input or raw_input.
-- payload.saved_links → one per link: id "s1", "s2", ...; type "saved_link"; description = title + snippet if present; url.
+- payload.saved_links → one per link: id "s1", "s2", ...; type "saved_link"; description = title + snippet if present; url. Include source_tier from the payload (primary | secondary | null). When a saved_link has ai_summary or ai_key_facts in the payload, that is what the link says (we opened and analyzed it); use that content in your synthesis for timeline, entities, and contradictions.
 - payload.notes_by_query → one per note (flatten all notes): id "n1", "n2", ...; type "note"; description = first 160 chars of content.
 - payload.results_by_query → one per result (flatten all results): id "r1", "r2", ...; type "result"; description = title + snippet if present; url.
 
-Then populate working_timeline: at least 1–5 events when any evidence exists. Each entry: time_window (use "Unknown date" or "Circa YYYY" if needed), event, confidence (high/medium/low), basis (public/note/confidential/unverified), source_ids (array of 1–4 ids from evidence_index, e.g. ["r1","s1"]).
-Then populate key_entities: at least 1–5 entities when any evidence mentions people/orgs/domains. Each entry: name, type (person/org/domain/location/handle/other), source_refs (array of 1–4 ids from evidence_index).
-Then contradictions_tensions: ALWAYS use the STRUCTURED CONFLICT format only (see CONTRADICTIONS / TENSIONS section below). Do NOT output legacy-only items (issue+details+source_refs). When there is a real tension or contradiction, output one or more structured conflicts. If only one side has evidence, still output a structured "tension" with statement_b e.g. "No corroborating evidence located yet" and statement_b_refs set to relevant evidence_index IDs that indicate absence or uncertainty (e.g. from notes or queries); explain the gap in why_it_matters.
+Then populate working_timeline: 1–5 events when evidence supports them. When evidence is thin, one or two well-sourced events are enough. Each entry: time_window (use "Unknown date" or "Circa YYYY" only when needed), event, confidence (high/medium/low), basis (public/note/confidential/unverified), source_ids (array of 1–4 ids from evidence_index, e.g. ["r1","s1"]).
+Then populate key_entities: 1–5 entities when the evidence mentions people/orgs/domains. When few are clearly present, output only those; do not pad. Each entry: name, type (person/org/domain/location/handle/other), source_refs (array of 1–4 ids from evidence_index).
+Then contradictions_tensions: Use the STRUCTURED CONFLICT format only (see CONTRADICTIONS / TENSIONS section below). Do NOT output legacy-only items (issue+details+source_refs). When there is a real tension or contradiction in the evidence, output one or more structured conflicts. If there are no real contradictions or tensions, leave contradictions_tensions as []. If only one side has evidence for a real tension, use statement_b e.g. "No corroborating evidence located yet" and statement_b_refs set to relevant evidence_index IDs; explain the gap in why_it_matters.
 
-Prefer 2–5 conservative entries per section when evidence exists rather than empty arrays.
+Prefer quality over count: 2–5 entries per section when evidence clearly supports them; fewer or one when evidence is thin.
 
 evidence_index:
-Keys must be stable IDs (e.g., q1, r1, n1, s1). Values: type, description, url (if applicable). All source_ids/source_refs in timeline, entities, contradictions must exist here.
+Keys must be stable IDs (e.g., q1, r1, n1, s1). Values: type, description, url (if applicable). For saved_link entries (s1, s2, ...), include source_tier (primary | secondary | null) from payload.saved_links so evidence weighting and credibility can use it. All source_ids/source_refs in timeline, entities, contradictions must exist here.
 
 working_timeline entries:
 - time_window
 - event
-- confidence (low/medium/high)
+- confidence (low/medium/high): when source_ids include evidence_index entries with source_tier "primary", confidence can be higher; when only secondary or unmarked sources support the event, use medium or low as appropriate.
 - basis
 - source_ids
 Do not output verified for working_timeline items. Verified is set by the user in the brief viewer (human authority). Omit the key or use false.
@@ -193,18 +203,22 @@ verification_tasks entries:
 - priority (low/medium/high)
 - suggested_queries (array of strings)
 
-REQUIRED: (1) Build evidence_index from the payload using the EVIDENCE MAPPING RULES above, then fill working_timeline and key_entities: when the payload has any queries, saved_links, notes, or results, each must contain at least one entry (cite evidence_index IDs in source_ids / source_refs). (2) When the evidence shows conflicting claims, different dates, or tensions, include at least one entry in contradictions_tensions using the STRUCTURED CONFLICT format only (issue, issue_type, statement_a, statement_a_refs, statement_b, statement_b_refs, why_it_matters, resolution_tasks); do NOT use legacy format (issue+details+source_refs). (3) When the case has multiple thematic lines (narrative, entities, timeline), include evidence_strength with 2–5 entries (theme, results_count, saved_links_count, wayback_count, note_count, corroboration_estimate, strength_rating). (4) At least one verification_tasks entry MUST be an explicit falsification test (task string states interpretation Y, evidence X, and "If X were found and showed [contrary fact], it would contradict or weaken [Y]"). (5) Also include other verification_tasks for gaps, unverified claims, and evidence-gathering. Output multiple verification_tasks—both the falsification one and the rest.
+REQUIRED: (1) Build evidence_index from the payload using the EVIDENCE MAPPING RULES above, then fill working_timeline and key_entities: when the payload has any queries, saved_links, notes, or results, include at least one entry in each (cite evidence_index IDs in source_ids / source_refs). When evidence is thin, one entry each is sufficient. (2) When the evidence shows real conflicting claims, different dates, or tensions, include one or more entries in contradictions_tensions using the STRUCTURED CONFLICT format only; if there are none, leave contradictions_tensions as []. Do NOT use legacy format (issue+details+source_refs). (3) When the case has multiple thematic lines supported by evidence, include evidence_strength with 2–5 entries; if the case does not have distinct themes, omit evidence_strength or include a single entry. (4) When the case supports a testable interpretation, include at least one verification_tasks entry that is an explicit falsification test (task states interpretation Y, evidence X, and how X would contradict or weaken Y). (5) Include other verification_tasks for gaps, unverified claims, and evidence-gathering as the evidence warrants. Prefer a few concrete tasks over generic ones.
 
 See Evidence Strength Matrix section below for evidence_strength field details.
 You MAY optionally include threads (array). See Cross-Query Clustering section below.
 You MAY optionally include hypotheses (array). See Hypothesis Engine below.
 You MAY optionally include critical_gaps (array). See Gap Detection below.
+You MAY optionally include collapse_tests (array). See Adversarial Collapse Testing below.
+You MAY optionally include incentive_matrix (array). See Incentive Matrix below.
+
+When in doubt, omit an optional section rather than pad with weak or generic content.
 
 ===============================
 CONTRADICTIONS / TENSIONS (STRUCTURED CONFLICTS ONLY)
 ===============================
 
-You MUST output every contradiction or tension as a STRUCTURED CONFLICT. Do NOT output legacy-only items (issue + details + source_refs). Every item in contradictions_tensions[] must include ALL of the following fields:
+Output each real contradiction or tension as a STRUCTURED CONFLICT; if the evidence has none, output contradictions_tensions as []. Do NOT output legacy-only items (issue + details + source_refs). Every item in contradictions_tensions[] must include ALL of the following fields:
 
 - issue (string): short label for the conflict
 - issue_type (string): exactly one of "date" | "count" | "identity" | "location" | "claim" | "other"
@@ -212,8 +226,8 @@ You MUST output every contradiction or tension as a STRUCTURED CONFLICT. Do NOT 
 - statement_a_refs (string[]): evidence_index IDs that support A (e.g. ["r3","s1","n2"]). MUST be keys that exist in evidence_index. Do NOT use raw URLs or "query:<id>". Use ONLY evidence_index IDs.
 - statement_b (string): conflicting claim or second view. If only one side has evidence, use e.g. "No corroborating evidence located yet" and still provide statement_b_refs (see below).
 - statement_b_refs (string[]): evidence_index IDs that support B (or that indicate absence/uncertainty when statement_b is "No corroborating evidence located yet"). MUST be keys that exist in evidence_index.
-- why_it_matters (string): MUST explicitly include the phrase "This does not add up because…" and briefly explain why both cannot be true or why the gap matters. Keep it short and concrete. Use neutral language; no guilt or accusation—inconsistency analysis only.
-- resolution_tasks (string[]): REQUIRED. Concrete actions to resolve or test the conflict (e.g. obtain primary record, check archived versions, seek additional corroboration). At least one task per conflict.
+- why_it_matters (string): Include the phrase "This does not add up because…" where it fits; briefly explain why both cannot be true or why the gap matters. Keep it short and concrete. Use neutral language; no guilt or accusation—inconsistency analysis only.
+- resolution_tasks (string[]): REQUIRED. One or more concrete actions to resolve or test the conflict (e.g. obtain primary record, check archived versions, seek additional corroboration).
 
 Evidence ref rules (CRITICAL — validation fails if refs are invalid):
 - statement_a_refs and statement_b_refs MUST reference ONLY keys that exist in evidence_index (e.g. q1, r1, s1, n1).
@@ -248,7 +262,7 @@ Keep the JSON schema keys unchanged elsewhere.
 EVIDENCE STRENGTH MATRIX (OPTIONAL)
 ===============================
 
-Include an "evidence_strength" array in the JSON output when appropriate. When the case has multiple thematic lines (narrative, entities, contradictions, timeline), prefer to include this array with 3–8 entries so the brief shows evidence strength per theme.
+Include an "evidence_strength" array when the case has multiple thematic lines supported by evidence (narrative, entities, contradictions, timeline). When it does, 2–8 entries are enough; one well-chosen theme is better than padding to several. When the case does not have distinct themes, omit the key or include a single entry.
 
 Each entry represents a THEMATIC LINE in the case — NOT a query.
 
@@ -268,18 +282,16 @@ Each element MUST include:
 - note_count (number)
 - corroboration_estimate (string; e.g. "multiple independent sources", "single source", "limited documentation")
 - strength_rating ("high" | "medium" | "low")
+- supporting_refs (string[]): evidence_index IDs that support this theme (e.g. ["s1","r2","n1"]). Use ONLY keys that exist in evidence_index. Primary/secondary counts are derived from these refs and evidence_index source_tier, so you may omit primary_sources_count and secondary_sources_count or set them; they will be overwritten from supporting_refs.
 
-Counts must reflect supporting evidence for that theme, derived from:
-results_by_query, saved_links, notes_by_query, wayback results.
+Counts (results_count, saved_links_count, etc.) must reflect the evidence for that theme. supporting_refs ties this theme to the same evidence_index used by timeline, entities, and contradictions.
 
 Strength rating guidance:
-- High → multiple independent sources with corroboration
-- Medium → some corroboration but limited volume or independence
-- Low → minimal or single-source support
+- High → multiple independent sources with corroboration; themes with primary sources marked by the analyst count more.
+- Medium → some corroboration but limited volume or independence; or mainly secondary sources.
+- Low → minimal or single-source support; or no primary sources for a key claim.
 
-Generate 3–8 thematic entries maximum.
-Do NOT generate one per query.
-Only include themes actually supported by evidence.
+Include only themes actually supported by evidence. Do NOT generate one per query. One or two themes are fine when that is what the evidence supports.
 
 If insufficient evidence exists to justify this section, omit the key entirely.
 
@@ -339,6 +351,8 @@ You may include a "critical_gaps" array when the case has clear missing evidence
 
 Gap types to consider (reference real weaknesses in the data):
 - Single-source dependency: only one result or note supports a key claim.
+- Missing primary source: key claim supported only by secondary or unmarked sources; analyst has not marked a primary source for this.
+- Only secondary support: theme or claim has no primary-tier sources in evidence_index.
 - Timeline missing anchors: dates or sequence unverified by primary sources.
 - Conflicting counts/dates: contradictions not yet resolved by additional evidence.
 - Missing primary documents: incident reports, filings, official records, originals.
@@ -357,11 +371,83 @@ Rules:
 - suggested_queries must be copy-pasteable or easy to adapt; not just a raw URL. Prefer site:, filetype:, archive, court/docket, primary source language.
 
 ===============================
+ADVERSARIAL COLLAPSE TESTING (OPTIONAL)
+===============================
+
+You may include a "collapse_tests" array when the case contains important claims or hypotheses that rest on specific assumptions.
+Goal: stress-test the chain. Not emotional. Purely structural: if X is wrong, what collapses?
+
+Each collapse test MUST include:
+- claim_or_hypothesis (string): the claim or hypothesis being stress-tested.
+- critical_assumptions (string[]): assumptions that must hold for the claim to stand.
+- single_points_of_failure (string[]): specific fragile points where the chain collapses if wrong.
+- what_would_falsify (string[]): concrete evidence or facts that would falsify/break the claim.
+- highest_leverage_next_step (string): ONE most direct next step to reduce collapse risk.
+- supporting_refs (string[]): ONLY evidence_index IDs (e.g. ["r1","s1","n2"]). These MUST exist as keys in evidence_index.
+
+Rules:
+- Use neutral, precise language. No guilt, no accusation.
+- Do NOT invent references. If you are unsure, output fewer items rather than making up IDs.
+- Do NOT output raw URLs, and do NOT use "query:<id>" in supporting_refs. Only evidence_index IDs.
+
+===============================
+INCENTIVE MATRIX — STRATEGIC INTELLIGENCE (OPTIONAL)
+===============================
+
+You may include an "incentive_matrix" array when the case contains competing narratives (e.g., Narrative A vs Narrative B) and identifiable actors with different stakes.
+
+Purpose:
+Provide a strategic view of who might benefit under different narrative outcomes. This is not about guilt or motive attribution. It is about structural incentives and exposure.
+
+Tone rules:
+- Use strictly conditional language.
+- Examples:
+  - "If Narrative A is true, incentives could include…"
+  - "Under Narrative B, this actor might benefit from…"
+- Do NOT assert intent.
+- Do NOT make definitive claims about motives.
+- Do NOT accuse.
+
+Each entry MUST include:
+- actor (string): person, organization, role, or actor type.
+- role (string): their relationship to the case (e.g., "source", "subject", "interested party", "regulator").
+- narrative_a_incentives (string[]): incentives if Narrative A holds (conditional phrasing).
+- narrative_b_incentives (string[]): incentives if Narrative B holds (conditional phrasing).
+- exposure_if_false (string[]): what they stand to lose if a narrative they are tied to is false (conditional phrasing).
+- supporting_refs (string[]): ONLY evidence_index IDs (e.g. ["r1","s1","n2"]). May be empty [] if the entry is purely analytical.
+
+Ref rules:
+- supporting_refs may be [] when no specific evidence item supports the strategic analysis.
+- When non-empty, each ref MUST exist as a key in evidence_index.
+- Do NOT output raw URLs.
+- Do NOT use "query:<id>".
+- Do NOT invent IDs.
+
+Quality rules:
+- Prefer 1–5 high-value entries.
+- Do not fabricate actors not present in the case context.
+- If no meaningful competing narratives exist, omit incentive_matrix entirely.
+
+===============================
+BUILD ORDER & EXECUTIVE OVERVIEW (write last)
+===============================
+
+Build the JSON in this order:
+1) evidence_index
+2) working_timeline
+3) key_entities
+4) contradictions_tensions
+5) verification_tasks
+6) executive_overview — write this LAST.
+
+Write executive_overview only after all other sections above are fixed. It must reference the main timeline events and key_entities you just produced so the brief reads as one coherent story. Do not invent new facts; only synthesize what is already in the JSON. Where a verification_task clearly addresses a specific contradiction or gap, the overview may note that link.
+
+===============================
 FINAL INSTRUCTION
 ===============================
 
 Generate a structured forensic brief using the investigative protocol above.
-Build evidence_index from the payload (q1, s1, n1, r1...) then fill working_timeline and key_entities with 2–5 entries each when the payload has queries, saved_links, notes, or results.
+Build evidence_index from the payload (q1, s1, n1, r1...) then fill working_timeline, key_entities, contradictions_tensions, verification_tasks. Write executive_overview last so it ties those sections into one story. Use 1–5 entries per section when evidence supports it—one entry each is enough when evidence is thin.
 Return ONLY valid JSON.
 No markdown.
 No explanatory text.
@@ -393,7 +479,7 @@ export async function POST(
 
     const { data: caseRow, error: caseErr } = await (supabaseServer
       .from('cases') as any)
-      .select('id, title, tags, user_id')
+      .select('id, title, tags, user_id, objective')
       .eq('id', caseId)
       .maybeSingle();
 
@@ -466,7 +552,7 @@ export async function POST(
     }
 
     const { data: savedRaw } = await (supabaseServer.from('saved_links') as any)
-      .select('id, source, url, title, snippet, captured_at, query_id, case_id, created_at')
+      .select('id, source, url, title, snippet, captured_at, query_id, case_id, source_tier, created_at, ai_summary, ai_key_facts, ai_entities')
       .eq('user_id', userId)
       .eq('case_id', caseId)
       .order('created_at', { ascending: false });
@@ -487,17 +573,26 @@ export async function POST(
       notesBySavedLink = Object.fromEntries(byLink);
     }
 
-    const savedLinks = (savedRaw || []).map((s: Record<string, unknown>) => ({
-      source: s.source,
-      url: s.url,
-      title: s.title,
-      snippet: truncate(s.snippet as string, MAX_SNIPPET_LEN),
-      captured_at: s.captured_at,
-      query_id: s.query_id,
-      case_id: s.case_id,
-      created_at: s.created_at,
-      notes: notesBySavedLink[s.id as string] ?? [],
-    }));
+    const savedLinks = (savedRaw || []).map((s: Record<string, unknown>) => {
+      const base = {
+        source: s.source,
+        url: s.url,
+        title: s.title,
+        snippet: truncate(s.snippet as string, MAX_SNIPPET_LEN),
+        captured_at: s.captured_at,
+        query_id: s.query_id,
+        case_id: s.case_id,
+        source_tier: s.source_tier ?? null,
+        created_at: s.created_at,
+        notes: notesBySavedLink[s.id as string] ?? [],
+      };
+      if (s.ai_summary != null || (Array.isArray(s.ai_key_facts) && s.ai_key_facts.length > 0)) {
+        (base as Record<string, unknown>).ai_summary = s.ai_summary ?? null;
+        (base as Record<string, unknown>).ai_key_facts = Array.isArray(s.ai_key_facts) ? s.ai_key_facts : null;
+        (base as Record<string, unknown>).ai_entities = Array.isArray(s.ai_entities) ? s.ai_entities : null;
+      }
+      return base;
+    });
 
     const allResults = Object.values(resultsByQuery).flat() as Array<{
       source?: string;
@@ -506,10 +601,44 @@ export async function POST(
       (r) => r.source === 'wayback'
     ).length;
 
+    let evidenceBundleCounts: { total: number; result: number; saved_link: number; note: number } = {
+      total: 0,
+      result: 0,
+      saved_link: 0,
+      note: 0,
+    };
+    try {
+      const bundle = buildCaseEvidenceBundle(caseId, {
+        results_by_query: resultsByQuery,
+        notes_by_query: notesByQuery,
+        saved_links: savedLinks,
+      });
+      const byKind = { result: 0, saved_link: 0, note: 0 };
+      for (const item of bundle.items) {
+        if (item.kind === 'result') byKind.result++;
+        else if (item.kind === 'saved_link') byKind.saved_link++;
+        else if (item.kind === 'note') byKind.note++;
+      }
+      evidenceBundleCounts = {
+        total: bundle.items.length,
+        result: byKind.result,
+        saved_link: byKind.saved_link,
+        note: byKind.note,
+      };
+    } catch {
+      // fallback: leave counts at zero and continue generating brief
+    }
+
+    const caseObjective =
+      caseRow.objective != null && String(caseRow.objective).trim() !== ''
+        ? String(caseRow.objective).trim()
+        : null;
+
     const payload = {
       case: {
         title: caseRow.title,
         tags: caseRow.tags ?? [],
+        ...(caseObjective ? { objective: caseObjective } : {}),
       },
       queries: queries.map(
         (q: Record<string, unknown>) => ({
@@ -531,18 +660,27 @@ export async function POST(
         saved_links: savedLinks.length,
         wayback_results: waybackCount,
       },
+      evidence_bundle_counts: evidenceBundleCounts,
     };
 
-    const userContent = `Evaluate the case evidence below using the investigative protocol. Return ONLY valid JSON.
+    const objectiveBlock = caseObjective
+      ? `\nCASE OBJECTIVE (MANDATORY ORIENTATION): The user's objective for this case is: "${caseObjective}". Every section of the brief must help the reader make progress toward this objective. Executive overview should frame the situation in light of it. Working timeline, key_entities, contradictions_tensions, hypotheses, verification_tasks, evidence_strength, and critical_gaps should emphasize what supports, challenges, or clarifies this objective. Do not summarize the objective; orient the analysis toward it.\n\n`
+      : '\n';
 
-You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from queries, saved_links, notes_by_query, results_by_query) and fill working_timeline and key_entities with at least one entry each when this payload has any queries, saved_links, notes, or results. (2) When evidence shows tensions or contradictions, fill contradictions_tensions with at least one entry using the STRUCTURED CONFLICT format only (issue, issue_type, statement_a, statement_a_refs, statement_b, statement_b_refs, why_it_matters with "This does not add up because…", resolution_tasks); no legacy format. (3) When the case has multiple themes, include evidence_strength with 2–5 entries. (4) Include at least one verification_task that is an explicit falsification test (task states interpretation and "If [evidence X] were found and showed [contrary fact], it would contradict or weaken [that interpretation]"). (5) Include other verification_tasks for gaps, unverified claims, and evidence-gathering. Output multiple verification_tasks—both the falsification one and the rest—not only one task.\n\n${JSON.stringify(payload)}`;
+    const userContent = `Evaluate the case evidence below using the investigative protocol.${objectiveBlock}Return ONLY valid JSON.
+
+You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from queries, saved_links, notes_by_query, results_by_query); for each saved_link (s1, s2, ...) include source_tier (primary | secondary | null) from the payload. Fill working_timeline and key_entities with at least one entry each when this payload has any queries, saved_links, notes, or results; one entry each is enough when evidence is thin. (2) When evidence shows real tensions or contradictions, add entries to contradictions_tensions using the STRUCTURED CONFLICT format only; if there are none, use []. (3) Include evidence_strength only when the case has multiple themes supported by evidence (2–5 entries); otherwise omit or one entry. (4) When the case supports a testable interpretation, include at least one verification_task that is an explicit falsification test. (5) Add other verification_tasks for gaps and evidence-gathering as warranted. Prefer fewer, concrete tasks over generic ones. (6) Write executive_overview last; it must reference timeline and key_entities so the brief reads as one story.\n\n${JSON.stringify(payload)}`;
 
     let briefJson: unknown;
     try {
-      briefJson = await generateStructuredJson<unknown>(
+      const result = await generateStructuredJson<unknown>(
         BRIEF_SYSTEM_PROMPT,
         userContent
       );
+      briefJson = result.data;
+      if (result.usage && userId) {
+        await recordTokenUsage(supabaseServer as any, userId, result.usage);
+      }
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : 'OpenAI request failed';
@@ -598,12 +736,117 @@ You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from que
             prevBriefJson as BriefJson,
             validated
           );
-          (validated as Record<string, unknown>).changes_since_last_version = changes;
+          validated.changes_since_last_version = changes;
         }
       }
     }
 
-    validated.source_credibility_summary = computeSourceCredibilitySummary(validated.evidence_index);
+    const credibilitySentence = computeSourceCredibilitySummary(validated.evidence_index);
+    validated.source_credibility_summary = credibilitySentence.startsWith('Sources in this brief') || credibilitySentence.startsWith('Evidence in this brief')
+      ? credibilitySentence
+      : `Sources in this brief: ${credibilitySentence}`;
+    validated.integrity_score = computeIntegrityScore(validated);
+    validated.evidence_network = computeEvidenceNetwork(validated);
+    deriveEvidenceStrengthCounts(validated);
+    validated.coherence_alerts = computeCoherenceAlerts(validated);
+
+    // Phase 4 (Cohesion): optional entity_summary_panel + evidence_summary_panel (deterministic, no AI)
+    try {
+      const { data: entityRows } = await (supabaseServer.from('case_entities') as any)
+        .select('id, name, entity_type, mention_count')
+        .eq('case_id', caseId)
+        .eq('user_id', userId)
+        .order('mention_count', { ascending: false })
+        .limit(10);
+      const topEntities = (entityRows || []).map((r: { name: string; entity_type: string; mention_count: number }) => ({
+        name: r.name,
+        type: r.entity_type,
+        mention_count: r.mention_count ?? 0,
+      }));
+      const notableConnections: string[] = [];
+      if (entityRows?.length) {
+        const entityIds = entityRows.map((e: { id: string }) => e.id);
+        const { data: mentionRows } = await (supabaseServer.from('entity_mentions') as any)
+          .select('entity_id, evidence_kind')
+          .in('entity_id', entityIds)
+          .eq('case_id', caseId)
+          .eq('user_id', userId);
+        const byEntity = new Map<string, Map<string, number>>();
+        for (const m of mentionRows || []) {
+          let kindMap = byEntity.get(m.entity_id);
+          if (!kindMap) {
+            kindMap = new Map<string, number>();
+            byEntity.set(m.entity_id, kindMap);
+          }
+          kindMap.set(m.evidence_kind, (kindMap.get(m.evidence_kind) ?? 0) + 1);
+        }
+        const nameById = new Map(entityRows.map((e: { id: string; name: string }) => [e.id, e.name]));
+        for (const [eid, kindMap] of Array.from(byEntity.entries())) {
+          const name = nameById.get(eid) ?? 'Entity';
+          const parts: string[] = [];
+          const saved = kindMap.get('saved_link') ?? 0;
+          const notes = kindMap.get('note') ?? 0;
+          const results = kindMap.get('result') ?? 0;
+          if (saved) parts.push(`${saved} saved link${saved !== 1 ? 's' : ''}`);
+          if (notes) parts.push(`${notes} note${notes !== 1 ? 's' : ''}`);
+          if (results) parts.push(`${results} result${results !== 1 ? 's' : ''}`);
+          if (parts.length) notableConnections.push(`${name} appears in ${parts.join(' and ')}.`);
+        }
+      }
+      validated.entity_summary_panel = {
+        intro: 'The following entities were extracted from case evidence (Rebuild Entities) and appear in the sources below.',
+        top_entities: topEntities,
+        notable_connections: notableConnections,
+      };
+    } catch {
+      // leave entity_summary_panel unset on error
+    }
+
+    try {
+      const totals = {
+        results: payload.counts.results ?? 0,
+        saved_links: payload.counts.saved_links ?? 0,
+        notes: payload.counts.notes ?? 0,
+        wayback_results: payload.counts.wayback_results ?? 0,
+      };
+      const evidenceIndex = validated.evidence_index ?? {};
+      const domainCounts = new Map<string, number>();
+      for (const entry of Object.values(evidenceIndex)) {
+        const e = entry && typeof entry === 'object' ? entry : {};
+        const url = (e as { url?: string }).url;
+        if (url && typeof url === 'string') {
+          try {
+            const u = new URL(url);
+            const host = u.hostname.replace(/^www\./, '');
+            if (host) domainCounts.set(host, (domainCounts.get(host) ?? 0) + 1);
+          } catch {
+            // skip invalid url
+          }
+        }
+      }
+      const top_sources = Array.from(domainCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([label, count]) => ({ label, count }));
+
+      const coverage_notes: string[] = [];
+      const timeline = validated.working_timeline ?? [];
+      if (timeline.length > 0) {
+        let singleRef = 0;
+        for (const item of timeline) {
+          const refs = item.source_refs ?? item.source_ids ?? [];
+          if (refs.length <= 1) singleRef++;
+        }
+        if (singleRef >= timeline.length * 0.5) {
+          coverage_notes.push('Most timeline events cite only 1 ref.');
+        }
+      }
+
+      const intro = `This brief is based on ${totals.results} results, ${totals.saved_links} saved links, ${totals.notes} notes, and ${totals.wayback_results} wayback captures.`;
+      validated.evidence_summary_panel = { intro, totals, top_sources, coverage_notes };
+    } catch {
+      // leave evidence_summary_panel unset on error
+    }
 
     const evidenceCounts = {
       queries: payload.counts.queries,
