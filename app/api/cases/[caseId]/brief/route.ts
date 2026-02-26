@@ -673,7 +673,7 @@ You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from que
 
     let briefJson: unknown;
     try {
-      const result = await generateStructuredJson<unknown>(
+      const result = await generateStructuredJson<BriefJson>(
         BRIEF_SYSTEM_PROMPT,
         userContent
       );
