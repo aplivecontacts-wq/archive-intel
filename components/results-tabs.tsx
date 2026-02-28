@@ -765,14 +765,14 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
       if (process.env.NODE_ENV === 'development') console.log('[ResultsTabs] fetch URL:', url);
       const response = await fetch(url);
       const text = await response.text();
-      let data: { results?: unknown[] } | null = null;
+      let data: { results?: Result[] } | null = null;
       try {
         data = text ? JSON.parse(text) : null;
       } catch {
         if (!response.ok) data = null;
       }
       if (process.env.NODE_ENV === 'development') console.log('[ResultsTabs] raw API response:', data);
-      const resultsList = (response.ok && data?.results) ? data.results : [];
+      const resultsList: Result[] = (response.ok && data && Array.isArray(data.results)) ? data.results : [];
       setResults(resultsList);
     } catch (error) {
       console.error('Failed to fetch results:', error);
