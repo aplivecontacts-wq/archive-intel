@@ -620,3 +620,78 @@ export function buildBriefPdf(
   const out = doc.output('arraybuffer');
   return new Uint8Array(out);
 }
+
+/** Case overview PDF when no brief exists (for full-case export). */
+export type CaseOverviewInput = {
+  caseTitle: string;
+  objective: string | null;
+  exportedAt: string;
+  queries: { id: string; title?: string | null; created_at: string }[];
+  savedLinks: { url: string; title?: string | null; source: string }[];
+};
+
+export function buildCaseOverviewPdf(input: CaseOverviewInput): Uint8Array {
+  const doc = new jsPDF();
+  let y = MARGIN;
+
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text(input.caseTitle || 'Untitled Case', MARGIN, y);
+  y += LINE + 2;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Case export · ${input.exportedAt}`, MARGIN, y);
+  y += LINE + SECTION_GAP;
+
+  if (input.objective?.trim()) {
+    y = addSectionTitle(doc, 'Objective', y);
+    y = addWrappedText(doc, input.objective.trim(), MARGIN, y, 10);
+    y += SECTION_GAP;
+  }
+
+  y = addSectionTitle(doc, 'Queries', y, true);
+  if (!input.queries.length) {
+    y = addWrappedText(doc, 'No queries yet.', MARGIN, y, 10);
+  } else {
+    for (const q of input.queries) {
+      y = ensureNewPage(doc, y);
+      const title = (q.title || 'Untitled query').slice(0, 80);
+      doc.setFontSize(10);
+      doc.text(title, MARGIN, y);
+      y += LINE;
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text(new Date(q.created_at).toLocaleString(), MARGIN, y);
+      doc.setTextColor(0, 0, 0);
+      y += LINE + 2;
+    }
+  }
+  y += SECTION_GAP;
+
+  y = addSectionTitle(doc, 'Saved Links', y, true);
+  if (!input.savedLinks.length) {
+    y = addWrappedText(doc, 'No saved links.', MARGIN, y, 10);
+  } else {
+    for (const link of input.savedLinks) {
+      y = ensureNewPage(doc, y);
+      const header = (link.title || link.url || '').slice(0, 80);
+      doc.setFontSize(10);
+      doc.text(header, MARGIN, y);
+      y += LINE;
+      doc.setFontSize(9);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`${link.source} · ${link.url}`, MARGIN, y);
+      doc.setTextColor(0, 0, 0);
+      y += LINE + 2;
+    }
+  }
+
+  y += SECTION_GAP;
+  y = ensureNewPage(doc, y);
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'italic');
+  doc.text('No brief generated yet. Generate a brief from the Case Briefs tab for a full forensic report.', MARGIN, y);
+
+  const out = doc.output('arraybuffer');
+  return new Uint8Array(out);
+}

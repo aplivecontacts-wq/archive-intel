@@ -209,6 +209,38 @@ export interface Database {
           created_at?: string
         }
       }
+      saved_link_attachments: {
+        Row: {
+          id: string
+          user_id: string
+          saved_link_id: string
+          file_name: string
+          mime_type: string
+          size_bytes: number
+          storage_path: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          saved_link_id: string
+          file_name: string
+          mime_type: string
+          size_bytes: number
+          storage_path: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          saved_link_id?: string
+          file_name?: string
+          mime_type?: string
+          size_bytes?: number
+          storage_path?: string
+          created_at?: string
+        }
+      }
       case_briefs: {
         Row: {
           id: string
@@ -254,6 +286,9 @@ export interface Database {
           case_id: string | null
           link_notes: string | null
           source_tier: 'primary' | 'secondary' | null
+          official_source: boolean
+          last_contact_at: string | null
+          risk_level: string | null
           extracted_text: string | null
           extracted_at: string | null
           extraction_error: string | null
@@ -276,6 +311,9 @@ export interface Database {
           case_id?: string | null
           link_notes?: string | null
           source_tier?: 'primary' | 'secondary' | null
+          official_source?: boolean
+          last_contact_at?: string | null
+          risk_level?: string | null
           extracted_text?: string | null
           extracted_at?: string | null
           extraction_error?: string | null
@@ -298,6 +336,9 @@ export interface Database {
           case_id?: string | null
           link_notes?: string | null
           source_tier?: 'primary' | 'secondary' | null
+          official_source?: boolean
+          last_contact_at?: string | null
+          risk_level?: string | null
           extracted_text?: string | null
           extracted_at?: string | null
           extraction_error?: string | null

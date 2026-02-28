@@ -1550,8 +1550,8 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
           </DialogHeader>
           <div className="space-y-4 pt-2">
             <div>
-              <Label className="text-xs font-mono text-emerald-700">Left version (older)</Label>
-              <Select value={compareLeftId} onValueChange={setCompareLeftId}>
+              <Label className="text-xs font-mono text-emerald-700">Newer version (top)</Label>
+              <Select value={compareRightId} onValueChange={setCompareRightId}>
                 <SelectTrigger className="mt-1 border-emerald-200 font-mono">
                   <SelectValue placeholder="Select version" />
                 </SelectTrigger>
@@ -1565,8 +1565,8 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
               </Select>
             </div>
             <div>
-              <Label className="text-xs font-mono text-emerald-700">Right version (newer)</Label>
-              <Select value={compareRightId} onValueChange={setCompareRightId}>
+              <Label className="text-xs font-mono text-emerald-700">Older version (bottom)</Label>
+              <Select value={compareLeftId} onValueChange={setCompareLeftId}>
                 <SelectTrigger className="mt-1 border-emerald-200 font-mono">
                   <SelectValue placeholder="Select version" />
                 </SelectTrigger>

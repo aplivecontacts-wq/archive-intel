@@ -7,7 +7,9 @@ export function detectInputType(input: string): InputType {
     return 'url';
   }
 
-  if (trimmed.startsWith('@') || /^[a-zA-Z0-9_]{3,}$/.test(trimmed)) {
+  // Only treat as username when it clearly looks like a handle (starts with @).
+  // Single words like "FBI" or "Obama" stay "quote" and get phrase-style searches.
+  if (trimmed.startsWith('@')) {
     return 'username';
   }
 

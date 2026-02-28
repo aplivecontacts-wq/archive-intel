@@ -65,6 +65,9 @@ interface SavedLinkRow {
   case_id: string | null;
   link_notes?: string | null;
   source_tier?: 'primary' | 'secondary' | null;
+  official_source?: boolean;
+  last_contact_at?: string | null;
+  risk_level?: string | null;
   extracted_facts?: ExtractedFactsShape | null;
   extracted_at?: string | null;
   extraction_error?: string | null;
@@ -95,6 +98,7 @@ function SavedLinkCard({
   onRemove,
   onNoteSaved,
   onSourceTierChange,
+  onSourceMetaChange,
   caseId,
   onExtract,
 }: {
@@ -102,6 +106,7 @@ function SavedLinkCard({
   onRemove: () => Promise<void>;
   onNoteSaved: () => Promise<void>;
   onSourceTierChange?: (savedLinkId: string, source_tier: 'primary' | 'secondary' | null) => Promise<void>;
+  onSourceMetaChange?: (savedLinkId: string, patch: { last_contact_at?: string | null; risk_level?: string | null; official_source?: boolean }) => Promise<void>;
   caseId?: string | null;
   onExtract?: (savedLinkId: string) => Promise<void>;
 }) {
@@ -111,6 +116,13 @@ function SavedLinkCard({
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [updatingTier, setUpdatingTier] = useState(false);
+  const [updatingMeta, setUpdatingMeta] = useState(false);
+  const [showLinkAttachments, setShowLinkAttachments] = useState(false);
+  const [linkAttachments, setLinkAttachments] = useState<{ id: string; file_name: string; mime_type: string; size_bytes: number; url?: string | null; created_at: string }[]>([]);
+  const [linkAttachmentsLoading, setLinkAttachmentsLoading] = useState(false);
+  const [linkAttachmentUploading, setLinkAttachmentUploading] = useState(false);
+  const [linkAttachmentDeletingId, setLinkAttachmentDeletingId] = useState<string | null>(null);
+  const linkAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [extracting, setExtracting] = useState(false);
 
   const notes = s.notes ?? [];
@@ -175,6 +187,16 @@ function SavedLinkCard({
       setDeletingId(null);
     }
   }, [onNoteSaved]);
+
+  useEffect(() => {
+    if (!showLinkAttachments || !s.id) return;
+    setLinkAttachmentsLoading(true);
+    fetch(`/api/saved-links/${s.id}/attachments`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load'))))
+      .then((data) => setLinkAttachments(data.attachments ?? []))
+      .catch(() => setLinkAttachments([]))
+      .finally(() => setLinkAttachmentsLoading(false));
+  }, [showLinkAttachments, s.id]);
 
   return (
     <Card className="bg-white border-emerald-200 hover:border-emerald-300 transition-all">
@@ -315,6 +337,166 @@ function SavedLinkCard({
             </button>
           </div>
         </div>
+        {onSourceMetaChange && (
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-mono">
+            <label className="flex items-center gap-1.5 text-gray-500" title="Mark as official source (e.g. leaked doc, court filing) for credibility">
+              <input
+                type="checkbox"
+                checked={s.official_source === true}
+                onChange={async (e) => {
+                  const v = e.target.checked;
+                  setUpdatingMeta(true);
+                  try {
+                    await onSourceMetaChange(s.id, { official_source: v });
+                    await onNoteSaved();
+                  } finally {
+                    setUpdatingMeta(false);
+                  }
+                }}
+                disabled={updatingMeta}
+                className="rounded border-gray-300"
+              />
+              Official source
+            </label>
+            <label className="flex items-center gap-1.5 text-gray-500">
+              Last contact
+              <input
+                type="date"
+                value={(s.last_contact_at ?? '').toString().slice(0, 10)}
+                onChange={async (e) => {
+                  const v = e.target.value || null;
+                  setUpdatingMeta(true);
+                  try {
+                    await onSourceMetaChange(s.id, { last_contact_at: v });
+                    await onNoteSaved();
+                  } finally {
+                    setUpdatingMeta(false);
+                  }
+                }}
+                disabled={updatingMeta}
+                className="rounded border border-gray-200 px-1.5 py-0.5 text-gray-700"
+              />
+            </label>
+            <label className="flex items-center gap-1.5 text-gray-500">
+              Risk
+              <select
+                value={s.risk_level ?? ''}
+                onChange={async (e) => {
+                  const v = e.target.value || null;
+                  setUpdatingMeta(true);
+                  try {
+                    await onSourceMetaChange(s.id, { risk_level: v });
+                    await onNoteSaved();
+                  } finally {
+                    setUpdatingMeta(false);
+                  }
+                }}
+                disabled={updatingMeta}
+                className="rounded border border-gray-200 px-1.5 py-0.5 text-gray-700"
+              >
+                <option value="">—</option>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="whistleblower">Whistleblower</option>
+              </select>
+            </label>
+          </div>
+        )}
+        <div className="mt-2 pt-2 border-t border-gray-100">
+          <button
+            type="button"
+            onClick={() => setShowLinkAttachments((v) => !v)}
+            className="text-xs font-mono text-emerald-700 hover:underline flex items-center gap-1"
+          >
+            <Paperclip className="h-3.5 w-3.5" />
+            Attachments {showLinkAttachments ? '' : `(${linkAttachments.length > 0 ? linkAttachments.length : '…'})`}
+          </button>
+          {showLinkAttachments && (
+            <div className="mt-2 space-y-2">
+              {linkAttachmentsLoading ? (
+                <p className="text-xs text-gray-500 font-mono flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</p>
+              ) : (
+                <>
+                  {linkAttachments.length === 0 && !linkAttachmentUploading && (
+                    <p className="text-xs text-gray-500 font-mono">No attachments. Add a PDF or image below.</p>
+                  )}
+                  {linkAttachments.map((att) => (
+                    <div key={att.id} className="flex items-center justify-between gap-2 text-xs font-mono bg-gray-50 rounded px-2 py-1.5">
+                      <a
+                        href={att.url ?? '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-700 hover:underline truncate flex-1 min-w-0"
+                      >
+                        {att.file_name} ({(att.size_bytes / 1024).toFixed(1)} KB)
+                      </a>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setLinkAttachmentDeletingId(att.id);
+                          try {
+                            const res = await fetch(`/api/saved-links/${s.id}/attachments?id=${encodeURIComponent(att.id)}`, { method: 'DELETE' });
+                            if (!res.ok) throw new Error('Delete failed');
+                            setLinkAttachments((prev) => prev.filter((a) => a.id !== att.id));
+                            toast.success('Attachment removed');
+                          } catch {
+                            toast.error('Failed to remove attachment');
+                          } finally {
+                            setLinkAttachmentDeletingId(null);
+                          }
+                        }}
+                        disabled={linkAttachmentDeletingId === att.id}
+                        className="p-1 rounded hover:bg-red-50 text-red-600 disabled:opacity-50"
+                        title="Remove attachment"
+                      >
+                        {linkAttachmentDeletingId === att.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <input
+                      ref={linkAttachmentInputRef}
+                      type="file"
+                      accept="application/pdf,image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setLinkAttachmentUploading(true);
+                        try {
+                          const fd = new FormData();
+                          fd.append('file', file);
+                          const res = await fetch(`/api/saved-links/${s.id}/attachments`, { method: 'POST', body: fd });
+                          const data = await res.json().catch(() => ({}));
+                          if (!res.ok) throw new Error(data?.error || 'Upload failed');
+                          setLinkAttachments((prev) => [...prev, { id: data.attachment.id, file_name: data.attachment.file_name, mime_type: data.attachment.mime_type, size_bytes: data.attachment.size_bytes, url: data.attachment.url, created_at: data.attachment.created_at }]);
+                          toast.success('Attachment added');
+                          if (linkAttachmentInputRef.current) linkAttachmentInputRef.current.value = '';
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : 'Upload failed');
+                        } finally {
+                          setLinkAttachmentUploading(false);
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="font-mono text-xs border-emerald-200 text-emerald-700"
+                      disabled={linkAttachmentUploading}
+                      onClick={() => linkAttachmentInputRef.current?.click()}
+                    >
+                      {linkAttachmentUploading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                      Add PDF or image
+                    </Button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
         {showNotes && (
           <div className="mt-3 pt-3 border-t border-gray-100">
             <label className="text-xs font-mono text-gray-500 uppercase block mb-1">Notes (e.g. URLs or text from this link)</label>
@@ -416,14 +598,21 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
   const [manualTitle, setManualTitle] = useState('');
   const [manualUrl, setManualUrl] = useState('');
   const [manualSnippet, setManualSnippet] = useState('');
+  const [manualFile, setManualFile] = useState<File | null>(null);
+  const manualFileInputRef = useRef<HTMLInputElement | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
 
   const fetchSaved = useCallback(async () => {
     try {
       const res = await fetch('/api/saved');
+      const text = await res.text();
       if (res.ok) {
-        const data = await res.json();
-        setSavedLinks(data.saved || []);
+        try {
+          const data = text ? JSON.parse(text) : {};
+          setSavedLinks(data.saved || []);
+        } catch {
+          setSavedLinks([]);
+        }
       }
     } catch {
       setSavedLinks([]);
@@ -573,11 +762,17 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
   const fetchResults = useCallback(async () => {
     try {
       const url = `/api/results?queryId=${queryId}`;
-      console.log('[ResultsTabs] fetch URL:', url);
+      if (process.env.NODE_ENV === 'development') console.log('[ResultsTabs] fetch URL:', url);
       const response = await fetch(url);
-      const data = response.ok ? await response.json() : null;
-      console.log('[ResultsTabs] raw API response:', data);
-      const resultsList = data?.results || [];
+      const text = await response.text();
+      let data: { results?: unknown[] } | null = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        if (!response.ok) data = null;
+      }
+      if (process.env.NODE_ENV === 'development') console.log('[ResultsTabs] raw API response:', data);
+      const resultsList = (response.ok && data?.results) ? data.results : [];
       setResults(resultsList);
     } catch (error) {
       console.error('Failed to fetch results:', error);
@@ -593,8 +788,13 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
         setAttachments([]);
         return;
       }
-      const data = await response.json();
-      setAttachments(data.attachments || []);
+      const text = await response.text();
+      try {
+        const data = text ? JSON.parse(text) : {};
+        setAttachments(data.attachments || []);
+      } catch {
+        setAttachments([]);
+      }
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
         console.error('[ResultsTabs] attachments fetch error', error);
@@ -606,9 +806,14 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
   const fetchNotes = useCallback(async () => {
     try {
       const response = await fetch(`/api/notes?queryId=${queryId}`);
+      const text = await response.text();
       if (response.ok) {
-        const data = await response.json();
-        setNotes(data.notes || []);
+        try {
+          const data = text ? JSON.parse(text) : {};
+          setNotes(data.notes || []);
+        } catch {
+          setNotes([]);
+        }
       } else {
         setNotes([]);
       }
@@ -1506,6 +1711,24 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                     toast.error(e instanceof Error ? e.message : 'Failed to update');
                   }
                 }}
+                onSourceMetaChange={async (savedLinkId, patch) => {
+                  try {
+                    const res = await fetch('/api/saved', {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ id: savedLinkId, ...patch }),
+                    });
+                    if (!res.ok) {
+                      const errBody = await res.json().catch(() => ({}));
+                      if (process.env.NODE_ENV === 'development') console.error('[ResultsTabs] PATCH source meta failed', res.status, errBody);
+                      throw new Error((errBody && typeof errBody.error === 'string') ? errBody.error : 'Failed to update');
+                    }
+                    await fetchSaved();
+                  } catch (e) {
+                    if (process.env.NODE_ENV === 'development' && e instanceof Error) console.error('[ResultsTabs] source meta error', e.message);
+                    toast.error(e instanceof Error ? e.message : 'Failed to update');
+                  }
+                }}
                 caseId={caseId}
                 onExtract={
                   caseId
@@ -1608,6 +1831,33 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                 disabled={manualSaving}
               />
             </div>
+            <div className="space-y-2">
+              <Label className="text-emerald-700 font-mono text-sm">Attach PDF or image (optional)</Label>
+              <input
+                ref={manualFileInputRef}
+                type="file"
+                accept="application/pdf,image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={(e) => setManualFile(e.target.files?.[0] ?? null)}
+              />
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="font-mono border-emerald-200 text-emerald-700"
+                  disabled={manualSaving}
+                  onClick={() => manualFileInputRef.current?.click()}
+                >
+                  {manualFile ? manualFile.name : 'Choose file'}
+                </Button>
+                {manualFile && (
+                  <span className="text-xs text-gray-500 font-mono">
+                    {(manualFile.size / 1024).toFixed(1)} KB
+                  </span>
+                )}
+              </div>
+            </div>
             <Button
               type="button"
               className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white font-mono"
@@ -1630,10 +1880,25 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                   });
                   const data = await res.json();
                   if (!res.ok) throw new Error(data.error || 'Failed to add entry');
-                  toast.success('Entry added — see Saved tab');
+                  const newId = data.saved?.id;
+                  if (manualFile && newId) {
+                    const fd = new FormData();
+                    fd.append('file', manualFile);
+                    const upRes = await fetch(`/api/saved-links/${newId}/attachments`, {
+                      method: 'POST',
+                      body: fd,
+                    });
+                    if (!upRes.ok) {
+                      const errData = await upRes.json().catch(() => ({}));
+                      toast.error(errData?.error || 'Entry added but attachment failed');
+                    }
+                  }
+                  toast.success(manualFile && newId ? 'Entry and attachment added' : 'Entry added — see Saved tab');
                   setManualTitle('');
                   setManualUrl('');
                   setManualSnippet('');
+                  setManualFile(null);
+                  if (manualFileInputRef.current) manualFileInputRef.current.value = '';
                   fetchSaved();
                 } catch (e) {
                   toast.error(e instanceof Error ? e.message : 'Failed to add entry');

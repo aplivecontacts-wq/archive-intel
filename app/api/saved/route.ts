@@ -158,6 +158,7 @@ export async function POST(request: NextRequest) {
 }
 
 const SOURCE_TIER_VALUES = new Set(['primary', 'secondary', null]);
+const RISK_LEVEL_VALUES = new Set(['low', 'medium', 'high', 'whistleblower', null]);
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -167,7 +168,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { id, link_notes, source_tier } = body;
+    const { id, link_notes, source_tier, official_source, last_contact_at, risk_level } = body;
 
     if (!id || typeof id !== 'string') {
       return NextResponse.json({ error: 'id is required' }, { status: 400 });
@@ -178,6 +179,18 @@ export async function PATCH(request: NextRequest) {
     if (source_tier !== undefined && !SOURCE_TIER_VALUES.has(source_tier)) {
       return NextResponse.json(
         { error: 'source_tier must be "primary", "secondary", or null' },
+        { status: 400 }
+      );
+    }
+    if (official_source !== undefined && typeof official_source !== 'boolean') {
+      return NextResponse.json({ error: 'official_source must be a boolean' }, { status: 400 });
+    }
+    if (last_contact_at !== undefined && last_contact_at !== null && typeof last_contact_at !== 'string') {
+      return NextResponse.json({ error: 'last_contact_at must be an ISO date string or null' }, { status: 400 });
+    }
+    if (risk_level !== undefined && risk_level !== null && !RISK_LEVEL_VALUES.has(risk_level)) {
+      return NextResponse.json(
+        { error: 'risk_level must be "low", "medium", "high", "whistleblower", or null' },
         { status: 400 }
       );
     }
@@ -199,8 +212,20 @@ export async function PATCH(request: NextRequest) {
     if (source_tier !== undefined) {
       updates.source_tier = source_tier;
     }
+    if (official_source !== undefined) {
+      updates.official_source = official_source;
+    }
+    if (last_contact_at !== undefined) {
+      updates.last_contact_at = last_contact_at == null || last_contact_at === '' ? null : last_contact_at;
+    }
+    if (risk_level !== undefined) {
+      updates.risk_level = risk_level == null || risk_level === '' ? null : risk_level;
+    }
     if (Object.keys(updates).length === 0) {
-      return NextResponse.json({ error: 'Provide link_notes and/or source_tier to update' }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Provide at least one of: link_notes, source_tier, official_source, last_contact_at, risk_level' },
+        { status: 400 }
+      );
     }
 
     const { data: updated, error } = await (supabaseServer.from('saved_links') as any)
@@ -213,7 +238,7 @@ export async function PATCH(request: NextRequest) {
     if (error) {
       if (process.env.NODE_ENV === 'development') console.error('[api/saved] PATCH error:', error);
       const msg = (error as { message?: string }).message ?? String(error);
-      const hint = /does not exist|undefined column|link_notes|source_tier/i.test(msg)
+      const hint = /does not exist|undefined column|link_notes|source_tier|official_source|last_contact_at|risk_level/i.test(msg)
         ? ' Run database migrations (e.g. supabase db push).'
         : '';
       return NextResponse.json({ error: msg + hint }, { status: 500 });

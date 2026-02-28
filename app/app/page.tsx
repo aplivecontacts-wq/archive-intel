@@ -31,9 +31,15 @@ export default function AppPage() {
   const fetchCases = async () => {
     try {
       const response = await fetch('/api/cases');
-      if (response.ok) {
-        const data = await response.json();
-        setCases(data.cases || []);
+      const text = await response.text();
+      let data: { cases?: Case[] } = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        // non-JSON (e.g. 500 HTML) – leave cases empty
+      }
+      if (response.ok && data.cases) {
+        setCases(data.cases);
       }
     } catch (error) {
       console.error('Failed to fetch cases:', error);

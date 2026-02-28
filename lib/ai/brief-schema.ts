@@ -74,7 +74,7 @@ export interface EvidenceStrengthItem {
 
 export type EvidenceIndex = Record<
   string,
-  { type?: string; description?: string; url?: string; source_tier?: 'primary' | 'secondary' | null }
+  { type?: string; description?: string; url?: string; source_tier?: 'primary' | 'secondary' | null; official_source?: boolean }
 >;
 
 export interface BriefHypothesis {
@@ -228,10 +228,14 @@ export function validateBriefJson(raw: unknown): BriefJson {
         `working_timeline[${i}].confidence must be high, medium, or low`
       );
     }
-    if (!BASIS_VALUES.has(String(t.basis))) {
-      throw new Error(
-        `working_timeline[${i}].basis must be public, note, confidential, or unverified`
-      );
+    const rawBasis = String(t.basis ?? '').toLowerCase();
+    if (!BASIS_VALUES.has(rawBasis)) {
+      // Coerce AI slip-ups (e.g. "published", "official") to valid value so brief doesn't fail
+      const fallback =
+        rawBasis === 'published' || rawBasis === 'official' ? 'public' : 'unverified';
+      (t as { basis: string }).basis = fallback;
+    } else {
+      (t as { basis: string }).basis = rawBasis as 'public' | 'note' | 'confidential' | 'unverified';
     }
     const sourceIds = t.source_ids;
     if (!Array.isArray(sourceIds)) {
@@ -797,65 +801,89 @@ export function validateBriefJson(raw: unknown): BriefJson {
   return obj as unknown as BriefJson;
 }
 
-/** Phase 10.1: deterministic heuristic summary of source credibility from evidence_index only. No AI. */
+/** Single source of truth for source credibility. Used by integrity score, coherence alerts, and summary. */
 const NEWS_DOMAINS = [
   'nytimes.com', 'bbc.com', 'reuters.com', 'apnews.com', 'washingtonpost.com',
   'theguardian.com', 'npr.org', 'cnn.com', 'abcnews.go.com', 'cbsnews.com',
   'nbcnews.com', 'pbs.org', 'aljazeera.com', 'axios.com', 'politico.com',
   'bloomberg.com', 'wsj.com', 'ft.com', 'economist.com', 'latimes.com',
   'usatoday.com', 'usnews.com', 'newsweek.com', 'time.com',
+  'afp.com', 'ap.org', 'dw.com', 'cbc.ca', 'abc.net.au', 'scmp.com', 'france24.com',
+  'theconversation.com', 'nature.com', 'science.org', 'statnews.com',
 ];
 const SOCIAL_DOMAINS = [
   'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'tiktok.com', 'reddit.com',
   'youtube.com', 'linkedin.com', 'threads.net', 'snapchat.com',
 ];
+/** Official URL patterns: .gov, .gov.xx, .mil, .europa.eu, common official hostnames */
+function isOfficialUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  if (u.endsWith('.gov') || u.includes('.gov/') || u.includes('.gov.')) return true;
+  if (u.endsWith('.mil') || u.includes('.mil/') || u.includes('.mil.')) return true;
+  if (u.includes('.europa.eu') || u.includes('europa.eu/')) return true;
+  if (u.includes('un.org') || u.includes('state.gov') || u.includes('who.int')) return true;
+  return false;
+}
 
-export function classifyEvidenceEntry(entry: { type?: string; url?: string }): 'official' | 'established_news' | 'social' | 'internal' | 'unverified' {
-  const type = (entry.type ?? '').toLowerCase();
+export type CredibilityCategory = 'official' | 'established_news' | 'social' | 'internal' | 'unverified' | 'other';
+
+export function classifyEvidenceEntry(entry: { type?: string; url?: string; source_tier?: string | null; official_source?: boolean }): CredibilityCategory {
+  const e = entry && typeof entry === 'object' ? entry : {};
+  if (e.official_source === true) return 'official';
+  const type = (e.type ?? '').toLowerCase();
   if (type === 'note' || type === 'confidential') return 'internal';
-  const url = (entry.url ?? '').toLowerCase();
+  const url = (e.url ?? '').toLowerCase();
   if (!url) return 'unverified';
-  if (url.endsWith('.gov') || url.includes('.gov/')) return 'official';
+  if (isOfficialUrl(url)) return 'official';
   if (NEWS_DOMAINS.some((d) => url.includes(d))) return 'established_news';
   if (SOCIAL_DOMAINS.some((d) => url.includes(d))) return 'social';
-  return 'unverified';
+  return 'other';
+}
+
+/** Weight 0–1 for credibility score. Primary and analyst-marked official get full weight. */
+export function getCredibilityWeight(entry: { type?: string; url?: string; source_tier?: string | null; official_source?: boolean }): number {
+  const e = entry && typeof entry === 'object' ? entry : {};
+  if (e.official_source === true) return 1.0;
+  const tier = e.source_tier;
+  if (tier === 'primary') return 1.0;
+  if (tier === 'secondary') return 0.8;
+  switch (classifyEvidenceEntry(e)) {
+    case 'official': return 1.0;
+    case 'established_news': return 1.0;
+    case 'other': return 0.5;
+    case 'social': return 0.35;
+    case 'internal': return 0.3;
+    default: return 0.2;
+  }
 }
 
 export function computeSourceCredibilitySummary(evidenceIndex: EvidenceIndex): string {
-  let official = 0, establishedNews = 0, social = 0, internal = 0, unverified = 0;
-  let primaryTier = 0, secondaryTier = 0;
   const entries = evidenceIndex && typeof evidenceIndex === 'object' && !Array.isArray(evidenceIndex)
     ? Object.values(evidenceIndex)
     : [];
+  if (entries.length === 0) return 'No evidence index entries; credibility cannot be assessed.';
+  let weightSum = 0;
+  let officialCount = 0, primaryCount = 0, secondaryCount = 0;
   for (const entry of entries) {
     const e = entry && typeof entry === 'object' ? entry : {};
-    const tier = (e as { source_tier?: string }).source_tier;
-    if (tier === 'primary') primaryTier++;
-    else if (tier === 'secondary') secondaryTier++;
-    switch (classifyEvidenceEntry(e)) {
-      case 'official': official++; break;
-      case 'established_news': establishedNews++; break;
-      case 'social': social++; break;
-      case 'internal': internal++; break;
-      default: unverified++; break;
-    }
+    weightSum += getCredibilityWeight(e);
+    if (classifyEvidenceEntry(e) === 'official') officialCount++;
+    if ((e as { source_tier?: string }).source_tier === 'primary') primaryCount++;
+    if ((e as { source_tier?: string }).source_tier === 'secondary') secondaryCount++;
   }
-  const total = official + establishedNews + social + internal + unverified;
-  if (total === 0) return 'No evidence index entries; credibility cannot be assessed.';
-  const strong = official + establishedNews;
-  const weak = social + unverified;
+  const avgWeight = weightSum / entries.length;
   const tierNote =
-    primaryTier > 0 || secondaryTier > 0
-      ? ` (${primaryTier} primary, ${secondaryTier} secondary source${primaryTier + secondaryTier !== 1 ? 's' : ''} marked by analyst)`
+    primaryCount > 0 || secondaryCount > 0
+      ? ` (${primaryCount} primary, ${secondaryCount} secondary source${primaryCount + secondaryCount !== 1 ? 's' : ''} marked by analyst)`
       : '';
-  if (internal >= total * 0.5) {
-    return 'Primary reliance is on internal notes and confidential material; limited publicly verifiable documentation.' + tierNote;
+  if (avgWeight >= 0.85) {
+    return 'Evidence draws strongly on official, established news, or analyst-marked primary sources.' + tierNote;
   }
-  if (strong >= total * 0.5) {
-    return 'Most evidence is derived from official government records and established news sources.' + tierNote;
+  if (avgWeight >= 0.5) {
+    return 'Evidence is mixed: a blend of official, news, analyst-marked, and other sources.' + tierNote;
   }
-  if (weak >= total * 0.5) {
-    return 'The brief relies heavily on social media and unverified sources; official corroboration is limited.' + tierNote;
+  if (avgWeight >= 0.3) {
+    return 'Significant reliance on social or internal material; consider adding analyst-marked primary or official sources.' + tierNote;
   }
-  return 'Evidence is mixed: some official documentation, but significant reliance on unverified or social sources.' + tierNote;
+  return 'Limited high-weight sources; adding official or analyst-marked primary/secondary sources would strengthen the brief.' + tierNote;
 }

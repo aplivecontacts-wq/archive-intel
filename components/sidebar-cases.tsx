@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Plus, FolderOpen, Terminal, Trash2, LogOut } from 'lucide-react';
+import { Plus, FolderOpen, Terminal, Trash2, LogOut, Download } from 'lucide-react';
 import { SignOutButton, SignedIn } from '@clerk/nextjs';
 import { PricingSheet } from '@/components/pricing-sheet';
 import { toast } from 'sonner';
@@ -53,6 +53,9 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
   const [loading, setLoading] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [caseToDelete, setCaseToDelete] = useState<string | null>(null);
+  const [deleteAllDialogOpen, setDeleteAllDialogOpen] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
+  const [exportingCaseId, setExportingCaseId] = useState<string | null>(null);
 
   const handleCreateCase = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -136,6 +139,14 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
               Exit Session
             </button>
           </SignOutButton>
+          <button
+            type="button"
+            onClick={() => setDeleteAllDialogOpen(true)}
+            className="mt-2 w-full flex items-center gap-2 px-3 py-2 text-sm font-mono text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all border border-transparent hover:border-red-200"
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete all my data
+          </button>
         </SignedIn>
       </div>
 
@@ -225,13 +236,48 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
                           </div>
                         </div>
                       </div>
-                      <button
-                        onClick={(e) => handleDeleteClick(e, caseItem.id)}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-red-50 rounded text-red-600 hover:text-red-700 flex-shrink-0"
-                        title="Delete case"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
+                      <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (exportingCaseId) return;
+                            setExportingCaseId(caseItem.id);
+                            try {
+                              const res = await fetch(`/api/cases/${caseItem.id}/export`, { credentials: 'include' });
+                              if (!res.ok) {
+                                const data = await res.json().catch(() => ({}));
+                                throw new Error(data?.error || 'Export failed');
+                              }
+                              const blob = await res.blob();
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = res.headers.get('Content-Disposition')?.match(/filename="([^"]+)"/)?.[1] || `case-export-${caseItem.id}.pdf`;
+                              a.click();
+                              URL.revokeObjectURL(url);
+                              toast.success('Case exported');
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : 'Export failed');
+                            } finally {
+                              setExportingCaseId(null);
+                            }
+                          }}
+                          className="p-1 hover:bg-emerald-50 rounded text-emerald-600 hover:text-emerald-700 disabled:opacity-50"
+                          title="Export case"
+                          disabled={!!exportingCaseId}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => handleDeleteClick(e, caseItem.id)}
+                          className="p-1 hover:bg-red-50 rounded text-red-600 hover:text-red-700 flex-shrink-0"
+                          title="Delete case"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </Link>
                 </div>
@@ -256,6 +302,52 @@ export function SidebarCases({ cases, onCaseCreated }: SidebarCasesProps) {
               className="bg-red-600 hover:bg-red-700 text-white font-mono"
             >
               DELETE
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteAllDialogOpen} onOpenChange={setDeleteAllDialogOpen}>
+        <AlertDialogContent className="bg-white border-emerald-200">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-700 font-mono">DELETE.ALL.MY.DATA</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-gray-600 font-mono text-sm space-y-2">
+                <p>This will permanently delete:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-xs">
+                  <li>All your cases</li>
+                  <li>All queries, results, and notes</li>
+                  <li>All saved links and their notes</li>
+                  <li>All briefs and case tasks</li>
+                  <li>Your token usage record</li>
+                </ul>
+                <p className="pt-1 font-semibold text-red-700">This action cannot be undone.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="font-mono border-emerald-200" disabled={deletingAll}>CANCEL</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                setDeletingAll(true);
+                try {
+                  const res = await fetch('/api/me/data', { method: 'DELETE' });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(data?.error || 'Failed');
+                  toast.success('All your data has been deleted.');
+                  setDeleteAllDialogOpen(false);
+                  onCaseCreated();
+                  router.push('/app');
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Failed to delete data');
+                } finally {
+                  setDeletingAll(false);
+                }
+              }}
+              disabled={deletingAll}
+              className="bg-red-600 hover:bg-red-700 text-white font-mono"
+            >
+              {deletingAll ? 'DELETING...' : 'DELETE ALL'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

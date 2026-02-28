@@ -1,45 +1,9 @@
 /**
  * Phase 11.3: Deterministic structural integrity score for a brief.
- * NO AI. Same input → same output. Uses only brief_json (and evidence_index).
+ * Uses single credibility module from brief-schema (tiered weights, official_source, primary/secondary).
  */
 import type { BriefJson, BriefIntegrityScore, EvidenceIndex } from '@/lib/ai/brief-schema';
-
-const NEWS_DOMAINS = [
-  'nytimes.com', 'bbc.com', 'reuters.com', 'apnews.com', 'washingtonpost.com',
-  'theguardian.com', 'npr.org', 'cnn.com', 'abcnews.go.com', 'cbsnews.com',
-  'nbcnews.com', 'pbs.org', 'aljazeera.com', 'axios.com', 'politico.com',
-  'bloomberg.com', 'wsj.com', 'ft.com', 'economist.com', 'latimes.com',
-  'usatoday.com', 'usnews.com', 'newsweek.com', 'time.com',
-];
-const SOCIAL_DOMAINS = [
-  'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'tiktok.com', 'reddit.com',
-  'youtube.com', 'linkedin.com', 'threads.net', 'snapchat.com',
-];
-
-function classifyEntry(entry: { type?: string; url?: string }): 'official' | 'established_news' | 'social' | 'internal' | 'unverified' {
-  const type = (entry.type ?? '').toLowerCase();
-  if (type === 'note' || type === 'confidential') return 'internal';
-  const url = (entry.url ?? '').toLowerCase();
-  if (!url) return 'unverified';
-  if (url.endsWith('.gov') || url.includes('.gov/')) return 'official';
-  if (NEWS_DOMAINS.some((d) => url.includes(d))) return 'established_news';
-  if (SOCIAL_DOMAINS.some((d) => url.includes(d))) return 'social';
-  return 'unverified';
-}
-
-function getCredibilityCounts(evidenceIndex: EvidenceIndex): { strong: number; total: number } {
-  const entries = evidenceIndex && typeof evidenceIndex === 'object' && !Array.isArray(evidenceIndex)
-    ? Object.values(evidenceIndex)
-    : [];
-  let official = 0, establishedNews = 0;
-  for (const entry of entries) {
-    const e = entry && typeof entry === 'object' ? entry : {};
-    const cat = classifyEntry(e);
-    if (cat === 'official') official++;
-    else if (cat === 'established_news') establishedNews++;
-  }
-  return { strong: official + establishedNews, total: entries.length };
-}
+import { getCredibilityWeight } from '@/lib/ai/brief-schema';
 
 export function computeIntegrityScore(brief: BriefJson): BriefIntegrityScore {
   // A) Timeline coverage (0–25)
@@ -69,9 +33,16 @@ export function computeIntegrityScore(brief: BriefJson): BriefIntegrityScore {
   else if (gapCount <= 4) gap_score = 5;
   else gap_score = 0;
 
-  // D) Credibility mix (0–20)
-  const { strong: strongSources, total: totalSources } = getCredibilityCounts(brief.evidence_index ?? {});
-  const credibility_score = totalSources === 0 ? 0 : (strongSources / totalSources) * 20;
+  // D) Credibility mix (0–20): tiered weights from single module (official, news, primary, secondary, other, social, internal)
+  const evidenceIndex: EvidenceIndex = brief.evidence_index ?? {};
+  const entries = typeof evidenceIndex === 'object' && !Array.isArray(evidenceIndex) ? Object.values(evidenceIndex) : [];
+  const totalSources = entries.length;
+  let weightSum = 0;
+  for (const entry of entries) {
+    const e = entry && typeof entry === 'object' ? entry : {};
+    weightSum += getCredibilityWeight(e);
+  }
+  const credibility_score = totalSources === 0 ? 0 : (weightSum / totalSources) * 20;
 
   // E) Hypothesis balance (0–20)
   const hypotheses = brief.hypotheses ?? [];
@@ -83,7 +54,14 @@ export function computeIntegrityScore(brief: BriefJson): BriefIntegrityScore {
   }
   const hypothesis_score = totalHyp === 0 ? 0 : (meaningfulCount / totalHyp) * 20;
 
-  const raw = timeline_score + contradiction_score + gap_score + credibility_score + hypothesis_score;
+  // F) Evidence depth (0–5): at least one theme with ≥1 supporting_ref
+  const evidenceStrength = brief.evidence_strength ?? [];
+  const hasDepth = evidenceStrength.some(
+    (es) => Array.isArray(es.supporting_refs) && es.supporting_refs.length >= 1
+  );
+  const depth_score = hasDepth ? 5 : 0;
+
+  const raw = timeline_score + contradiction_score + gap_score + credibility_score + hypothesis_score + depth_score;
   const score_0_100 = Math.round(Math.max(0, Math.min(100, raw)));
 
   // Grade bands: 90–100 A, 80–89 B, 70–79 C, 60–69 D, <60 F
@@ -97,21 +75,23 @@ export function computeIntegrityScore(brief: BriefJson): BriefIntegrityScore {
   const drivers: string[] = [];
   if (timeline_score > 20) drivers.push('High proportion of timeline events supported by multiple evidence references.');
   if (contradiction_score >= 18) drivers.push('Minimal unresolved contradictions.');
-  if (credibility_score > 15) drivers.push('Strong share of official or established news sources.');
+  if (credibility_score > 15) drivers.push('Strong share of official, news, or analyst-marked primary/official sources.');
   if (hypothesis_score > 15) drivers.push('Hypotheses include meaningful counter-evidence.');
   if (gap_score >= 10 && gapCount === 0) drivers.push('No critical evidence gaps identified.');
+  if (depth_score > 0) drivers.push('Evidence themes have supporting sources.');
 
   const weak_points: string[] = [];
   if (timeline_score < 10 && totalEvents > 0) weak_points.push('Low proportion of timeline events with multiple supporting references.');
   if (contradiction_score < 10 && contradictionCount > 0) weak_points.push('Multiple unresolved contradictions present.');
   if (gap_score < 7 && gapCount > 0) weak_points.push('Several critical evidence gaps remain.');
-  if (credibility_score < 10 && totalSources > 0) weak_points.push('Heavy reliance on lower-credibility or unverified sources.');
+  if (credibility_score < 10 && totalSources > 0) weak_points.push('Few official, news, or analyst-marked primary sources; consider marking key sources.');
   if (hypothesis_score < 10 && totalHyp > 0) weak_points.push('Hypotheses lack meaningful counter-evidence.');
+  if (depth_score === 0 && evidenceStrength.length === 0) weak_points.push('No evidence themes with supporting refs; add evidence_strength when case has distinct themes.');
 
   return {
     score_0_100,
     grade,
-    drivers: drivers.slice(0, 3),
-    weak_points: weak_points.slice(0, 3),
+    drivers: drivers.slice(0, 4),
+    weak_points: weak_points.slice(0, 4),
   };
 }

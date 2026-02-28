@@ -107,7 +107,13 @@ export default function CasePage() {
   const fetchQueries = useCallback(async () => {
     try {
       const response = await fetch(`/api/queries?caseId=${caseId}`);
-      const data = await response.json();
+      const text = await response.text();
+      let data: { queries?: Query[]; error?: string } = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: response.ok ? 'Invalid response' : text || response.statusText };
+      }
       if (response.ok) {
         const list = data.queries || [];
         setQueries((prev) => {
@@ -126,9 +132,19 @@ export default function CasePage() {
         }
       } else {
         console.error('Failed to fetch queries:', data?.error || response.statusText);
+        setQueries((prev) =>
+          prev.some((q) => q.status === 'running')
+            ? prev.map((q) => (q.status === 'running' ? { ...q, status: 'complete' as const } : q))
+            : prev
+        );
       }
     } catch (error) {
       console.error('Failed to fetch queries:', error);
+      setQueries((prev) =>
+        prev.some((q) => q.status === 'running')
+          ? prev.map((q) => (q.status === 'running' ? { ...q, status: 'complete' as const } : q))
+          : prev
+      );
     }
   }, [caseId]);
 
@@ -248,20 +264,22 @@ export default function CasePage() {
                   </CardTitle>
                   {currentCase && (
                     <div className="flex flex-col items-end gap-1 shrink-0">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="text-gray-500 hover:text-emerald-700 font-mono text-xs"
-                        onClick={() => {
-                          setEditTitle(currentCase.title);
-                          setEditObjective(currentCase.objective ?? '');
-                          setEditCaseOpen(true);
-                        }}
-                      >
-                        <Pencil className="h-3.5 w-3.5 mr-1" />
-                        Edit case
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="text-gray-500 hover:text-emerald-700 font-mono text-xs"
+                          onClick={() => {
+                            setEditTitle(currentCase.title);
+                            setEditObjective(currentCase.objective ?? '');
+                            setEditCaseOpen(true);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5 mr-1" />
+                          Edit case
+                        </Button>
+                      </div>
                       <Popover open={usageOpen} onOpenChange={(open) => {
                         setUsageOpen(open);
                         if (open) {

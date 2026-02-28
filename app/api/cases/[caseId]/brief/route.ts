@@ -169,7 +169,7 @@ EVIDENCE MAPPING RULES (DO THIS FIRST — THEN FILL TIMELINE, ENTITIES, CONTRADI
 
 Build evidence_index from the payload first. Use these IDs only (no fabrication):
 - payload.queries → one entry per query: id "q1", "q2", ... (1-based index); type "query"; description = normalized_input or raw_input.
-- payload.saved_links → one per link: id "s1", "s2", ...; type "saved_link"; description = title + snippet if present; url. Include source_tier from the payload (primary | secondary | null). When a saved_link has ai_summary or ai_key_facts in the payload, that is what the link says (we opened and analyzed it); use that content in your synthesis for timeline, entities, and contradictions.
+- payload.saved_links → one per link: id "s1", "s2", ...; type "saved_link"; description = title + snippet if present; url. Include source_tier (primary | secondary | null) and official_source (boolean) from the payload. When a saved_link has ai_summary or ai_key_facts, use that content in your synthesis. When it has extracted_facts (key_claims, summary), use that content too. Integrate all into timeline, entities, and contradictions—do not add a separate section; digest extracted_facts into the existing brief sections.
 - payload.notes_by_query → one per note (flatten all notes): id "n1", "n2", ...; type "note"; description = first 160 chars of content.
 - payload.results_by_query → one per result (flatten all results): id "r1", "r2", ...; type "result"; description = title + snippet if present; url.
 
@@ -180,7 +180,7 @@ Then contradictions_tensions: Use the STRUCTURED CONFLICT format only (see CONTR
 Prefer quality over count: 2–5 entries per section when evidence clearly supports them; fewer or one when evidence is thin.
 
 evidence_index:
-Keys must be stable IDs (e.g., q1, r1, n1, s1). Values: type, description, url (if applicable). For saved_link entries (s1, s2, ...), include source_tier (primary | secondary | null) from payload.saved_links so evidence weighting and credibility can use it. All source_ids/source_refs in timeline, entities, contradictions must exist here.
+Keys must be stable IDs (e.g., q1, r1, n1, s1). Values: type, description, url (if applicable). For saved_link entries (s1, s2, ...), include source_tier (primary | secondary | null) and official_source (boolean) from payload.saved_links so evidence weighting and credibility can use them. All source_ids/source_refs in timeline, entities, contradictions must exist here.
 
 working_timeline entries:
 - time_window
@@ -552,7 +552,7 @@ export async function POST(
     }
 
     const { data: savedRaw } = await (supabaseServer.from('saved_links') as any)
-      .select('id, source, url, title, snippet, captured_at, query_id, case_id, source_tier, created_at, ai_summary, ai_key_facts, ai_entities')
+      .select('id, source, url, title, snippet, captured_at, query_id, case_id, source_tier, official_source, created_at, ai_summary, ai_key_facts, ai_entities, extracted_facts')
       .eq('user_id', userId)
       .eq('case_id', caseId)
       .order('created_at', { ascending: false });
@@ -574,7 +574,7 @@ export async function POST(
     }
 
     const savedLinks = (savedRaw || []).map((s: Record<string, unknown>) => {
-      const base = {
+      const base: Record<string, unknown> = {
         source: s.source,
         url: s.url,
         title: s.title,
@@ -583,13 +583,21 @@ export async function POST(
         query_id: s.query_id,
         case_id: s.case_id,
         source_tier: s.source_tier ?? null,
+        official_source: s.official_source === true,
         created_at: s.created_at,
         notes: notesBySavedLink[s.id as string] ?? [],
       };
       if (s.ai_summary != null || (Array.isArray(s.ai_key_facts) && s.ai_key_facts.length > 0)) {
-        (base as Record<string, unknown>).ai_summary = s.ai_summary ?? null;
-        (base as Record<string, unknown>).ai_key_facts = Array.isArray(s.ai_key_facts) ? s.ai_key_facts : null;
-        (base as Record<string, unknown>).ai_entities = Array.isArray(s.ai_entities) ? s.ai_entities : null;
+        base.ai_summary = s.ai_summary ?? null;
+        base.ai_key_facts = Array.isArray(s.ai_key_facts) ? s.ai_key_facts : null;
+        base.ai_entities = Array.isArray(s.ai_entities) ? s.ai_entities : null;
+      }
+      const ef = s.extracted_facts;
+      if (ef != null && typeof ef === 'object' && !Array.isArray(ef)) {
+        const key_claims = (ef as { key_claims?: unknown }).key_claims;
+        const summary = (ef as { summary?: string }).summary;
+        if (Array.isArray(key_claims) && key_claims.length > 0) base.extracted_facts = { key_claims, summary: summary ?? '' };
+        else if (typeof summary === 'string' && summary.trim()) base.extracted_facts = { key_claims: [], summary };
       }
       return base;
     });
@@ -669,7 +677,7 @@ export async function POST(
 
     const userContent = `Evaluate the case evidence below using the investigative protocol.${objectiveBlock}Return ONLY valid JSON.
 
-You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from queries, saved_links, notes_by_query, results_by_query); for each saved_link (s1, s2, ...) include source_tier (primary | secondary | null) from the payload. Fill working_timeline and key_entities with at least one entry each when this payload has any queries, saved_links, notes, or results; one entry each is enough when evidence is thin. (2) When evidence shows real tensions or contradictions, add entries to contradictions_tensions using the STRUCTURED CONFLICT format only; if there are none, use []. (3) Include evidence_strength only when the case has multiple themes supported by evidence (2–5 entries); otherwise omit or one entry. (4) When the case supports a testable interpretation, include at least one verification_task that is an explicit falsification test. (5) Add other verification_tasks for gaps and evidence-gathering as warranted. Prefer fewer, concrete tasks over generic ones. (6) Write executive_overview last; it must reference timeline and key_entities so the brief reads as one story.\n\n${JSON.stringify(payload)}`;
+You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from queries, saved_links, notes_by_query, results_by_query); for each saved_link (s1, s2, ...) include source_tier (primary | secondary | null) and official_source (boolean) from the payload. Use ai_summary, ai_key_facts, and when present extracted_facts (key_claims, summary) to synthesize working_timeline, key_entities, and contradictions—integrate into existing sections, do not add a separate extracted_facts section. Fill working_timeline and key_entities with at least one entry each when this payload has any queries, saved_links, notes, or results; one entry each is enough when evidence is thin. (2) When evidence shows real tensions or contradictions, add entries to contradictions_tensions using the STRUCTURED CONFLICT format only; if there are none, use []. (3) Include evidence_strength only when the case has multiple themes supported by evidence (2–5 entries); otherwise omit or one entry. (4) When the case supports a testable interpretation, include at least one verification_task that is an explicit falsification test. (5) Add other verification_tasks for gaps and evidence-gathering as warranted. Prefer fewer, concrete tasks over generic ones. (6) Write executive_overview last; it must reference timeline and key_entities so the brief reads as one story.\n\n${JSON.stringify(payload)}`;
 
     let briefJson: unknown;
     try {
