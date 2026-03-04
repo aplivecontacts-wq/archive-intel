@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon, Bookmark, Paperclip, Upload, Trash2, StickyNote, PenLine } from 'lucide-react';
+import { ExternalLink, Clock, Search, FileText, Loader2, Copy, Building2, Info, LinkIcon, Bookmark, Paperclip, Upload, Trash2, StickyNote, PenLine, Mic, Play, Plus } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { isValidUrl, canonicalizeUrl } from '@/lib/url-utils';
@@ -86,11 +86,21 @@ interface NoteAttachment {
   url: string | null;
 }
 
+interface VoiceNoteRow {
+  id: string;
+  query_id: string;
+  recorded_at: string;
+  transcript: string | null;
+  url: string | null;
+  created_at: string;
+}
+
 interface ResultsTabsProps {
   queryId: string;
   queryStatus: 'running' | 'complete';
   rawInput?: string;
   caseId?: string;
+  voiceRefetchTrigger?: number;
 }
 
 function SavedLinkCard({
@@ -579,11 +589,19 @@ const linkifyText = (text: string) => {
 };
 
 
-export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsTabsProps) {
+export function ResultsTabs({ queryId, queryStatus, rawInput, caseId, voiceRefetchTrigger = 0 }: ResultsTabsProps) {
   const [results, setResults] = useState<Result[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteContent, setNoteContent] = useState('');
   const [loading, setLoading] = useState(true);
+  const [voiceNotes, setVoiceNotes] = useState<VoiceNoteRow[]>([]);
+  const [voiceLoading, setVoiceLoading] = useState(false);
+  const [voiceOrganizing, setVoiceOrganizing] = useState(false);
+  const [expandedVoiceId, setExpandedVoiceId] = useState<string | null>(null);
+  const [addMoreText, setAddMoreText] = useState('');
+  const [addMoreSubmitting, setAddMoreSubmitting] = useState(false);
+  const [voiceRecording, setVoiceRecording] = useState(false);
+  const [voiceUploading, setVoiceUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [showDateJump, setShowDateJump] = useState(false);
@@ -623,6 +641,29 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
   useEffect(() => {
     fetchSaved();
   }, [queryId, fetchSaved]);
+
+  const fetchVoiceNotes = useCallback(async () => {
+    if (!caseId) return;
+    setVoiceLoading(true);
+    try {
+      const url = `/api/cases/${caseId}/voice${queryId ? `?queryId=${queryId}` : ''}`;
+      const res = await fetch(url, { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setVoiceNotes(data.voiceNotes ?? []);
+      } else {
+        setVoiceNotes([]);
+      }
+    } catch {
+      setVoiceNotes([]);
+    } finally {
+      setVoiceLoading(false);
+    }
+  }, [caseId, queryId]);
+
+  useEffect(() => {
+    fetchVoiceNotes();
+  }, [fetchVoiceNotes, voiceRefetchTrigger]);
 
   // Saved tab and badge: current-query items plus archive items for current case (query_id null, case_id match or legacy null).
   const scopedSavedLinks = useMemo(
@@ -1042,6 +1083,10 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
         <TabsTrigger value="notes" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <FileText className="hidden sm:inline h-4 w-4 mr-2" />
           NOTES ({notes.length})
+        </TabsTrigger>
+        <TabsTrigger value="voice" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
+          <Mic className="hidden sm:inline h-4 w-4 mr-2" />
+          VOICE ({voiceNotes.length})
         </TabsTrigger>
         <TabsTrigger value="official" className="h-8 px-2 text-[11px] sm:text-sm sm:h-9 sm:px-3 data-[state=active]:bg-white data-[state=active]:text-emerald-700 data-[state=active]:shadow-sm">
           <Building2 className="hidden sm:inline h-4 w-4 mr-2" />
@@ -1652,6 +1697,206 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
             )}
           </CardContent>
         </Card>
+      </TabsContent>
+
+      <TabsContent value="voice" className="space-y-3 mt-4">
+        {!queryId ? (
+          <Card className="bg-white border-emerald-200 shadow-sm">
+            <CardContent className="text-center py-8">
+              <p className="text-emerald-600/50 font-mono text-sm">SELECT.A.QUERY.TO.RECORD.VOICE.NOTES</p>
+              <p className="text-gray-500 text-xs mt-2">Voice notes are saved to the currently selected query.</p>
+            </CardContent>
+          </Card>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={voiceUploading || !caseId}
+                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-mono"
+                onClick={async () => {
+                  if (voiceUploading || !caseId) return;
+                  if (voiceRecording) {
+                    const stop = (window as unknown as { __voiceStop?: () => void }).__voiceStop;
+                    if (stop) stop();
+                    return;
+                  }
+                  try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    const recorder = new MediaRecorder(stream);
+                    const chunks: Blob[] = [];
+                    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+                    recorder.onstop = async () => {
+                      stream.getTracks().forEach((t) => t.stop());
+                      const blob = new Blob(chunks, { type: 'audio/webm' });
+                      setVoiceUploading(true);
+                      try {
+                        const form = new FormData();
+                        form.append('queryId', queryId);
+                        form.append('file', blob, 'recording.webm');
+                        const res = await fetch(`/api/cases/${caseId}/voice`, {
+                          method: 'POST',
+                          body: form,
+                          credentials: 'include',
+                        });
+                        if (!res.ok) {
+                          const d = await res.json().catch(() => ({}));
+                          throw new Error(d?.error || 'Upload failed');
+                        }
+                        toast.success('Voice note saved');
+                        fetchVoiceNotes();
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : 'Upload failed');
+                      } finally {
+                        setVoiceUploading(false);
+                      }
+                    };
+                    recorder.start();
+                    setVoiceRecording(true);
+                    const stop = () => {
+                      if (recorder.state !== 'inactive') recorder.stop();
+                      setVoiceRecording(false);
+                    };
+                    (window as unknown as { __voiceStop?: () => void }).__voiceStop = stop;
+                  } catch (e) {
+                    toast.error('Microphone access denied or failed');
+                    setVoiceRecording(false);
+                  }
+                }}
+              >
+                {voiceRecording ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    RECORDING... (click to stop)
+                  </>
+                ) : voiceUploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    UPLOADING...
+                  </>
+                ) : (
+                  <>
+                    <Mic className="h-4 w-4 mr-2" />
+                    RECORD
+                  </>
+                )}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={voiceOrganizing || !caseId}
+                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-mono"
+                onClick={async () => {
+                  if (!caseId) return;
+                  setVoiceOrganizing(true);
+                  try {
+                    const url = `/api/cases/${caseId}/voice/organize${queryId ? `?queryId=${queryId}` : ''}`;
+                    const res = await fetch(url, { method: 'POST', credentials: 'include' });
+                    if (!res.ok) {
+                      const d = await res.json().catch(() => ({}));
+                      throw new Error(d?.error || 'Organize failed');
+                    }
+                    toast.success('Voice notes transcribed');
+                    fetchVoiceNotes();
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : 'Organize failed');
+                  } finally {
+                    setVoiceOrganizing(false);
+                  }
+                }}
+              >
+                {voiceOrganizing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                ORGANIZE
+              </Button>
+            </div>
+            {voiceLoading ? (
+              <div className="flex items-center gap-2 text-emerald-700 font-mono text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading voice notes...
+              </div>
+            ) : voiceNotes.length === 0 ? (
+              <Card className="bg-white border-emerald-200 shadow-sm">
+                <CardContent className="text-center py-8">
+                  <p className="text-emerald-600/50 font-mono text-sm">NO.VOICE.NOTES.YET</p>
+                  <p className="text-gray-500 text-xs mt-2">Record with the mic, then press Organize to transcribe.</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <ul className="space-y-2">
+                {voiceNotes.map((vn) => (
+                  <li key={vn.id} className="border border-emerald-200 rounded-lg bg-white overflow-hidden">
+                    <button
+                      type="button"
+                      className="w-full text-left p-3 flex items-start gap-2"
+                      onClick={() => setExpandedVoiceId(expandedVoiceId === vn.id ? null : vn.id)}
+                    >
+                      <span className="text-emerald-600 font-mono text-xs shrink-0">
+                        {new Date(vn.recorded_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <span className="text-sm text-gray-800 line-clamp-2 flex-1">
+                        {vn.transcript?.trim() || 'Not transcribed yet'}
+                      </span>
+                      <Play className="h-4 w-4 text-emerald-600 shrink-0" />
+                    </button>
+                    {expandedVoiceId === vn.id && (
+                      <div className="border-t border-emerald-100 p-3 space-y-3 bg-emerald-50/30">
+                        {vn.url && (
+                          <audio controls src={vn.url} className="w-full max-w-md" />
+                        )}
+                        {vn.transcript?.trim() && (
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{vn.transcript}</p>
+                        )}
+                        <div className="flex flex-wrap gap-2 items-center">
+                          <Input
+                            placeholder="Add more (text)..."
+                            value={addMoreText}
+                            onChange={(e) => setAddMoreText(e.target.value)}
+                            className="flex-1 min-w-[120px] border-emerald-200 font-mono text-sm"
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={addMoreSubmitting || !addMoreText.trim()}
+                            className="bg-emerald-600 hover:bg-emerald-700 font-mono"
+                            onClick={async () => {
+                              if (!caseId || !addMoreText.trim()) return;
+                              setAddMoreSubmitting(true);
+                              try {
+                                const res = await fetch(`/api/cases/${caseId}/voice/${vn.id}/add`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ text: addMoreText.trim() }),
+                                  credentials: 'include',
+                                });
+                                if (!res.ok) {
+                                  const d = await res.json().catch(() => ({}));
+                                  throw new Error(d?.error || 'Failed');
+                                }
+                                toast.success('Added');
+                                setAddMoreText('');
+                                fetchVoiceNotes();
+                              } catch (e) {
+                                toast.error(e instanceof Error ? e.message : 'Failed');
+                              } finally {
+                                setAddMoreSubmitting(false);
+                              }
+                            }}
+                          >
+                            <Plus className="h-4 w-4 mr-1" />
+                            ADD MORE
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
       </TabsContent>
 
       <TabsContent value="official" className="mt-4">

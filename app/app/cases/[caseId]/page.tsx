@@ -6,6 +6,7 @@ import { SidebarCases } from '@/components/sidebar-cases';
 import { SearchBar } from '@/components/search-bar';
 import { QueryList } from '@/components/query-list';
 import { ResultsTabs } from '@/components/results-tabs';
+import { VoiceMicFloat } from '@/components/voice-mic-float';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -108,6 +109,7 @@ export default function CasePage() {
   const [editDate, setEditDate] = useState('');
   const [editCategory, setEditCategory] = useState<'url' | 'username' | 'quote'>('quote');
   const [editQuerySaving, setEditQuerySaving] = useState(false);
+  const [voiceRefetchTrigger, setVoiceRefetchTrigger] = useState(0);
 
   const fetchQueries = useCallback(async () => {
     try {
@@ -932,22 +934,32 @@ export default function CasePage() {
 
               <div className="lg:col-span-3">
                 {selectedQuery ? (
-                  <Card className="bg-white border-emerald-200 shadow-sm">
-                    <CardHeader>
-                      <CardTitle className="text-emerald-700 text-lg font-mono">RESULTS</CardTitle>
-                      <CardDescription className="text-gray-600 truncate font-mono text-xs">
-                        {selectedQuery.raw_input}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <ResultsTabs
-                        queryId={selectedQuery.id}
-                        queryStatus={selectedQuery.status}
-                        rawInput={selectedQuery.raw_input}
+                  <>
+                    <Card className="bg-white border-emerald-200 shadow-sm">
+                      <CardHeader>
+                        <CardTitle className="text-emerald-700 text-lg font-mono">RESULTS</CardTitle>
+                        <CardDescription className="text-gray-600 truncate font-mono text-xs">
+                          {selectedQuery.raw_input}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <ResultsTabs
+                          queryId={selectedQuery.id}
+                          queryStatus={selectedQuery.status}
+                          rawInput={selectedQuery.raw_input}
+                          caseId={caseId}
+                          voiceRefetchTrigger={voiceRefetchTrigger}
+                        />
+                      </CardContent>
+                    </Card>
+                    {caseId && selectedQuery && (
+                      <VoiceMicFloat
                         caseId={caseId}
+                        queryId={selectedQuery.id}
+                        onUploaded={() => setVoiceRefetchTrigger((v) => v + 1)}
                       />
-                    </CardContent>
-                  </Card>
+                    )}
+                  </>
                 ) : (
                   <Card className="bg-white border-emerald-200 shadow-sm">
                     <CardContent className="text-center py-12 text-emerald-600/50 font-mono text-sm">
