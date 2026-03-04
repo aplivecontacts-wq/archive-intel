@@ -32,7 +32,7 @@ export function isLikelyNavFooter(name: string): boolean {
   const lower = name.trim().toLowerCase().replace(/\s+/g, ' ');
   if (lower.length < 4) return true;
   if (NAV_FOOTER_BLOCKLIST.has(lower)) return true;
-  for (const block of NAV_FOOTER_BLOCKLIST) {
+  for (const block of Array.from(NAV_FOOTER_BLOCKLIST)) {
     if (block.length >= 6 && lower.includes(block)) return true;
   }
   if (/\bfor\s+\w+\s+for\b/.test(lower)) return true;

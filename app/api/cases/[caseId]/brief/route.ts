@@ -543,7 +543,7 @@ function sanitizeBriefWhenAnalystHasPrimary(
         ''
       ).replace(/\s{2,}/g, ' ').trim();
     }
-    if (next !== overview) (brief as Record<string, unknown>).executive_overview = next;
+    if (next !== overview) (brief as unknown as Record<string, unknown>).executive_overview = next;
   }
 
   const tasks = brief.verification_tasks;
@@ -555,7 +555,7 @@ function sanitizeBriefWhenAnalystHasPrimary(
       if (/confirm\s+the\s+launch\s+date\s+as\s+September/.test(task) && !/different\s+date/.test(task)) return false;
       return true;
     });
-    if (filtered.length !== tasks.length) (brief as Record<string, unknown>).verification_tasks = filtered;
+    if (filtered.length !== tasks.length) (brief as unknown as Record<string, unknown>).verification_tasks = filtered;
   }
 }
 
