@@ -183,11 +183,23 @@ export interface BriefEvidenceNetwork {
   single_point_failures: BriefSinglePointFailure[];
 }
 
+/** Component scores (max points): timeline 25, contradictions 20, gaps 15, credibility 20, hypotheses 20, depth 5 = 100. */
+export interface IntegrityScoreBreakdown {
+  timeline_score: number;
+  contradiction_score: number;
+  gap_score: number;
+  credibility_score: number;
+  hypothesis_score: number;
+  depth_score: number;
+}
+
 export interface BriefIntegrityScore {
   score_0_100: number;
   grade: 'A' | 'B' | 'C' | 'D' | 'F';
   drivers: string[];
   weak_points: string[];
+  /** Optional breakdown by category for UI (e.g. Next Moves point estimates). */
+  breakdown?: IntegrityScoreBreakdown;
 }
 
 export function validateBriefJson(raw: unknown): BriefJson {

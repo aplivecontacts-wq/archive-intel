@@ -8,6 +8,7 @@ import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { generateStructuredJson } from '@/lib/ai/openai';
 import { recordTokenUsage } from '@/lib/usage';
+import { stripLeadingGovBoilerplate } from '@/lib/content-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -169,15 +170,21 @@ export async function POST(
           clearTimeout(timeout);
           if (res.ok) {
             const html = await res.text();
-            const fetched = stripHtml(html).trim();
-            if (fetched.length >= 100) pageText = fetched;
+            let fetched = stripHtml(html).trim();
+            if (fetched.length >= 100) {
+              if (firstArticleUrl.toLowerCase().includes('.gov')) fetched = stripLeadingGovBoilerplate(fetched);
+              if (fetched.length >= 100) pageText = fetched;
+            }
           }
         } catch (e) {
           if (process.env.NODE_ENV === 'development') console.error('[analyze] fetch note URL', firstArticleUrl, e);
         }
       }
-      if (pageText === (link.extracted_text || '').trim() || pageText.length < 100) {
+      if (pageText.length < 100) {
         pageText = notesBody.length > MAX_PAGE_CHARS ? notesBody.slice(0, MAX_PAGE_CHARS) : notesBody;
+        if (pageText.length < 100 && (link.extracted_text || '').trim().length >= 100) {
+          pageText = (link.extracted_text || '').trim();
+        }
       }
     } else if (pageText.length < 500) {
       try {

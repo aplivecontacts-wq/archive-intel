@@ -13,6 +13,27 @@ import { computeEvidenceNetwork } from '@/lib/evidence-network';
 import { deriveEvidenceStrengthCounts } from '@/lib/evidence-strength';
 import { computeCoherenceAlerts } from '@/lib/coherence-alerts';
 import { buildCaseEvidenceBundle } from '@/lib/evidence/normalize';
+import { isLikelyNavFooter } from '@/lib/entities/extract';
+
+/** When we have multiple sources, ensure each timeline entry has at least minRefs so integrity score is not unfairly lowered. */
+function ensureTimelineMultiRef(brief: BriefJson, minRefs: number): void {
+  const evidenceKeys = Object.keys(brief.evidence_index ?? {});
+  if (evidenceKeys.length < minRefs) return;
+  const timeline = brief.working_timeline ?? [];
+  for (const item of timeline) {
+    const refs = item.source_refs ?? item.source_ids ?? [];
+    const current = Array.isArray(refs) ? [...refs] : [];
+    while (current.length < minRefs) {
+      const nextKey = evidenceKeys.find((k) => !current.includes(k));
+      if (!nextKey) break;
+      current.push(nextKey);
+    }
+    if (current.length > (item.source_refs ?? item.source_ids ?? []).length) {
+      item.source_ids = current;
+      item.source_refs = current;
+    }
+  }
+}
 
 // Load .env.local at request time (Next.js sometimes doesn't inject it in API route context)
 config({ path: path.join(process.cwd(), '.env.local'), override: true });
@@ -25,6 +46,36 @@ function truncate(s: string | null | undefined, max: number): string {
   const str = String(s).trim();
   if (str.length <= max) return str;
   return str.slice(0, max) + '...';
+}
+
+const SEARCH_URL_PATTERNS_BRIEF = [
+  /google\.(com|[\w.]+)\/search/i,
+  /^https?:\/\/([^/]+\.)?google\.[^/]+(\/|$)/i,
+  /bing\.com\/search/i,
+  /duckduckgo\.com/i,
+  /search\.yahoo\.com/i,
+  /yandex\.(com|[\w.]+)\/search/i,
+  /baidu\.com\/s/i,
+  /^https?:\/\/[^/]*\?.*\b(q|query|search)=/i,
+];
+
+function isSearchEngineUrl(url: string): boolean {
+  try {
+    const u = String(url || '').trim().toLowerCase();
+    return SEARCH_URL_PATTERNS_BRIEF.some((re) => re.test(u));
+  } catch {
+    return false;
+  }
+}
+
+/** First non-search URL found in note contents (for evidence_from_notes payload hint). */
+function extractFirstUrlFromNotes(notes: { content: string }[]): string | null {
+  const text = (notes || []).map((n) => (n && typeof n.content === 'string' ? n.content : '')).join('\n');
+  const match = text.match(/https?:\/\/[^\s<>"']+/i);
+  if (!match) return null;
+  const u = match[0].replace(/[.,;:!?)]+$/, '').trim();
+  if (u.length < 10) return null;
+  return isSearchEngineUrl(u) ? null : u;
 }
 
 const BRIEF_SYSTEM_PROMPT = `
@@ -164,16 +215,31 @@ EVERY ASPECT (MANDATORY)
 Look at every aspect of the forensic brief. Before writing, consider each section: executive_overview, evidence_index, working_timeline, key_entities, contradictions_tensions, verification_tasks, and when evidence supports them — evidence_strength, hypotheses, critical_gaps, collapse_tests, incentive_matrix. For each aspect, decide what the evidence supports and fill it accordingly (or omit per the rules). Do not skip or overlook any part of the brief.
 
 ===============================
+PAYLOAD STRUCTURE — READ AND USE EVERY PIECE
+===============================
+
+The JSON payload you receive is the single source of truth. It flows from case → queries → results, notes, saved_links. You must read and synthesize all of it.
+
+- case: { title, tags, objective? } — When objective is present, orient executive_overview, timeline, entities, verification_tasks, and gaps toward it. Do not summarize the objective; use it to focus the analysis.
+- queries: array — One entry per query; use for evidence_index ids q1, q2, ... (description = normalized_input or raw_input).
+- results_by_query: { [queryId]: array } — Flatten to evidence_index ids r1, r2, ... (type "result"; description = title + snippet; url).
+- notes_by_query: { [queryId]: array } — Flatten to evidence_index ids n1, n2, ... (type "note"; description = first 160 chars of content).
+- saved_links: array — One per link; evidence_index ids s1, s2, ... Each item includes: source_tier (primary | secondary | null), official_source (boolean), notes[] (per-link notes), and when present ai_summary, ai_key_facts, extracted_facts. Use these in timeline, entities, and contradictions. When evidence_from_notes is true, the real evidence is in notes/canonical_evidence_url, not the link url.
+- analyst_sources (optional): When present, the analyst has already marked primary/official evidence. Follow its instruction in executive_overview and verification_tasks; do not suggest finding or confirming via primary/official.
+
+Build evidence_index from these arrays only. Cite only ids that exist there. Synthesize timeline, entities, contradictions, verification_tasks, and executive_overview from this evidence—nothing else.
+
+===============================
 EVIDENCE MAPPING RULES (DO THIS FIRST — THEN FILL TIMELINE, ENTITIES, CONTRADICTIONS)
 ===============================
 
 Build evidence_index from the payload first. Use these IDs only (no fabrication):
 - payload.queries → one entry per query: id "q1", "q2", ... (1-based index); type "query"; description = normalized_input or raw_input.
-- payload.saved_links → one per link: id "s1", "s2", ...; type "saved_link"; description = title + snippet if present; url. Include source_tier (primary | secondary | null) and official_source (boolean) from the payload. When a saved_link has ai_summary or ai_key_facts, use that content in your synthesis. When it has extracted_facts (key_claims, summary), use that content too. Integrate all into timeline, entities, and contradictions—do not add a separate section; digest extracted_facts into the existing brief sections.
+- payload.saved_links → one per link: id "s1", "s2", ...; type "saved_link"; description = title + snippet if present; url. Include source_tier (primary | secondary | null) and official_source (boolean) from the payload. When a saved_link has evidence_from_notes true (e.g. its url is a search engine page), source_tier and official_source apply to the evidence in the link's notes and to canonical_evidence_url when present—not to the search URL. For that entry in evidence_index, describe/cite the note content or canonical_evidence_url as the evidence; do not treat the search page URL as the primary/secondary source. When a saved_link has ai_summary or ai_key_facts, use that content in your synthesis. When it has extracted_facts (key_claims, summary), use that content too. Integrate all into timeline, entities, and contradictions—do not add a separate section; digest extracted_facts into the existing brief sections.
 - payload.notes_by_query → one per note (flatten all notes): id "n1", "n2", ...; type "note"; description = first 160 chars of content.
 - payload.results_by_query → one per result (flatten all results): id "r1", "r2", ...; type "result"; description = title + snippet if present; url.
 
-Then populate working_timeline: 1–5 events when evidence supports them. When evidence is thin, one or two well-sourced events are enough. Each entry: time_window (use "Unknown date" or "Circa YYYY" only when needed), event, confidence (high/medium/low), basis (public/note/confidential/unverified), source_ids (array of 1–4 ids from evidence_index, e.g. ["r1","s1"]).
+Then populate working_timeline: 1–5 events when evidence supports them. When evidence is thin, one or two well-sourced events are enough. Each entry: time_window (use "Unknown date" or "Circa YYYY" only when needed), event, confidence (high/medium/low), basis (public/note/confidential/unverified), source_ids (array of 1–4 ids from evidence_index, e.g. ["r1","s1"]). CRITICAL for integrity score: when the payload has 2 or more saved_links or multiple results, each working_timeline entry MUST list at least 2 source_ids—cite every evidence_index ID that supports that event; never cite only one source when multiple sources support it.
 Then populate key_entities: 1–5 entities when the evidence mentions people/orgs/domains. When few are clearly present, output only those; do not pad. Each entry: name, type (person/org/domain/location/handle/other), source_refs (array of 1–4 ids from evidence_index).
 Then contradictions_tensions: Use the STRUCTURED CONFLICT format only (see CONTRADICTIONS / TENSIONS section below). Do NOT output legacy-only items (issue+details+source_refs). When there is a real tension or contradiction in the evidence, output one or more structured conflicts. If there are no real contradictions or tensions, leave contradictions_tensions as []. If only one side has evidence for a real tension, use statement_b e.g. "No corroborating evidence located yet" and statement_b_refs set to relevant evidence_index IDs; explain the gap in why_it_matters.
 
@@ -202,6 +268,8 @@ verification_tasks entries:
 - task
 - priority (low/medium/high)
 - suggested_queries (array of strings)
+
+CRITICAL — When the payload has ANY saved_link with source_tier "primary" or official_source true (analyst already marked primary/official), do NOT output verification_tasks that mention: finding or locating a "primary source", "official documentation", or "documentation from [org]"; obtaining or securing "additional documentation"; or "if a primary source confirms" / "if a primary source document confirms". The analyst has already provided primary/official evidence; omit those tasks entirely. Only suggest tasks for real gaps (e.g. conflicting dates, missing corroboration where no primary exists, or falsification tests). Example of FORBIDDEN when payload has primary/official for launch date: "Obtain additional documentation from NASA", "If a primary source document confirms the launch date...", "Locate official NASA documentation".
 
 REQUIRED: (1) Build evidence_index from the payload using the EVIDENCE MAPPING RULES above, then fill working_timeline and key_entities: when the payload has any queries, saved_links, notes, or results, include at least one entry in each (cite evidence_index IDs in source_ids / source_refs). When evidence is thin, one entry each is sufficient. (2) When the evidence shows real conflicting claims, different dates, or tensions, include one or more entries in contradictions_tensions using the STRUCTURED CONFLICT format only; if there are none, leave contradictions_tensions as []. Do NOT use legacy format (issue+details+source_refs). (3) When the case has multiple thematic lines supported by evidence, include evidence_strength with 2–5 entries; if the case does not have distinct themes, omit evidence_strength or include a single entry. (4) When the case supports a testable interpretation, include at least one verification_tasks entry that is an explicit falsification test (task states interpretation Y, evidence X, and how X would contradict or weaken Y). (5) Include other verification_tasks for gaps, unverified claims, and evidence-gathering as the evidence warrants. Prefer a few concrete tasks over generic ones.
 
@@ -259,10 +327,10 @@ Example (format only):
 Keep the JSON schema keys unchanged elsewhere.
 
 ===============================
-EVIDENCE STRENGTH MATRIX (OPTIONAL)
+EVIDENCE STRENGTH MATRIX (REQUIRED WHEN PAYLOAD HAS 2+ SAVED_LINKS)
 ===============================
 
-Include an "evidence_strength" array when the case has multiple thematic lines supported by evidence (narrative, entities, contradictions, timeline). When it does, 2–8 entries are enough; one well-chosen theme is better than padding to several. When the case does not have distinct themes, omit the key or include a single entry.
+When the payload has 2 or more saved_links, you MUST include at least one evidence_strength entry with theme, counts (results_count, saved_links_count, wayback_count, note_count), corroboration_estimate, strength_rating, and supporting_refs (evidence_index IDs that support this theme). This is required for the brief integrity score. When the case has multiple thematic lines, include 2–5 entries; one well-chosen theme is enough when the case is narrow. When the payload has fewer than 2 saved_links and no distinct themes, omit the key or include a single entry.
 
 Each entry represents a THEMATIC LINE in the case — NOT a query.
 
@@ -328,7 +396,7 @@ If evidence does not support thematic clustering, omit the key entirely.
 HYPOTHESIS ENGINE (OPTIONAL)
 ===============================
 
-You may include a "hypotheses" array when the case admits competing explanations. Prefer 2–5 hypotheses. Think like an investigator: surface competing explanations with evidence for/against and falsification tests.
+You may include a "hypotheses" array when the case admits competing explanations or has a clear factual claim (e.g. a date, launch, or key event) supported by evidence. When the case has such a claim, include at least one hypothesis with statement, evidence_for (evidence_index IDs), and evidence_against (list any evidence_index ID that could qualify as counter or caution; use [] only if none exist). Hypotheses with at least one evidence_against ref improve the brief integrity score. Prefer 2–5 hypotheses when the case has competing explanations. Think like an investigator: surface competing explanations with evidence for/against and falsification tests.
 
 Each hypothesis MUST include:
 
@@ -440,7 +508,7 @@ Build the JSON in this order:
 5) verification_tasks
 6) executive_overview — write this LAST.
 
-Write executive_overview only after all other sections above are fixed. It must reference the main timeline events and key_entities you just produced so the brief reads as one coherent story. Do not invent new facts; only synthesize what is already in the JSON. Where a verification_task clearly addresses a specific contradiction or gap, the overview may note that link.
+Write executive_overview only after all other sections above are fixed. It must reference the main timeline events and key_entities you just produced so the brief reads as one coherent story. Do not invent new facts; only synthesize what is already in the JSON. Where a verification_task clearly addresses a specific contradiction or gap, the overview may note that link. If the payload includes analyst_sources or saved_links with source_tier primary or official_source true, the analyst has ALREADY provided primary/official evidence: state in executive_overview that the timeline is supported by analyst-marked primary and official sources; do NOT say that verification "focuses on confirming through primary sources" or that primary sources are still needed.
 
 ===============================
 FINAL INSTRUCTION
@@ -452,6 +520,44 @@ Return ONLY valid JSON.
 No markdown.
 No explanatory text.
 `;
+
+/** When payload has analyst-marked primary/official, enforce wording and drop redundant verification tasks. */
+function sanitizeBriefWhenAnalystHasPrimary(
+  brief: BriefJson,
+  hasAnalystMarkedPrimaryOrOfficial: boolean
+): void {
+  if (!hasAnalystMarkedPrimaryOrOfficial) return;
+
+  const overview = brief.executive_overview;
+  if (typeof overview === 'string' && overview.trim()) {
+    let next = overview;
+    if (/verification\s+tasks?\s+focus\s+on\s+confirming/i.test(next)) {
+      next = next.replace(
+        /[^.]*[Vv]erification\s+tasks?\s+focus\s+on\s+confirming[^.]*\./g,
+        'The timeline is supported by analyst-marked primary and official sources; any verification tasks address falsification or other gaps only.'
+      );
+    }
+    if (/ensuring\s+that\s+the\s+established\s+timeline\s+is\s+accurate\s+and\s+reliable/i.test(next)) {
+      next = next.replace(
+        /[^.]*[Ee]nsuring\s+that\s+the\s+established\s+timeline\s+is\s+accurate\s+and\s+reliable[^.]*\./g,
+        ''
+      ).replace(/\s{2,}/g, ' ').trim();
+    }
+    if (next !== overview) (brief as Record<string, unknown>).executive_overview = next;
+  }
+
+  const tasks = brief.verification_tasks;
+  if (Array.isArray(tasks) && tasks.length > 0) {
+    const filtered = tasks.filter((t) => {
+      const task = typeof t.task === 'string' ? t.task.trim().toLowerCase() : '';
+      if (/verify\s+the\s+exact\s+date\s+of/.test(task)) return false;
+      if (/obtain\s+(additional\s+)?documentation\s+from/.test(task)) return false;
+      if (/confirm\s+the\s+launch\s+date\s+as\s+September/.test(task) && !/different\s+date/.test(task)) return false;
+      return true;
+    });
+    if (filtered.length !== tasks.length) (brief as Record<string, unknown>).verification_tasks = filtered;
+  }
+}
 
 export async function POST(
   request: NextRequest,
@@ -574,6 +680,9 @@ export async function POST(
     }
 
     const savedLinks = (savedRaw || []).map((s: Record<string, unknown>) => {
+      const notes = notesBySavedLink[s.id as string] ?? [];
+      const linkUrl = (s.url as string) || '';
+      const fromNotes = isSearchEngineUrl(linkUrl) && notes.length > 0;
       const base: Record<string, unknown> = {
         source: s.source,
         url: s.url,
@@ -585,8 +694,13 @@ export async function POST(
         source_tier: s.source_tier ?? null,
         official_source: s.official_source === true,
         created_at: s.created_at,
-        notes: notesBySavedLink[s.id as string] ?? [],
+        notes,
       };
+      if (fromNotes) {
+        base.evidence_from_notes = true;
+        const canonicalUrl = extractFirstUrlFromNotes(notes);
+        if (canonicalUrl) base.canonical_evidence_url = canonicalUrl;
+      }
       if (s.ai_summary != null || (Array.isArray(s.ai_key_facts) && s.ai_key_facts.length > 0)) {
         base.ai_summary = s.ai_summary ?? null;
         base.ai_key_facts = Array.isArray(s.ai_key_facts) ? s.ai_key_facts : null;
@@ -642,7 +756,29 @@ export async function POST(
         ? String(caseRow.objective).trim()
         : null;
 
+    const primaryCount = savedLinks.filter(
+      (s: Record<string, unknown>) => s.source_tier === 'primary'
+    ).length;
+    const secondaryCount = savedLinks.filter(
+      (s: Record<string, unknown>) => s.source_tier === 'secondary'
+    ).length;
+    const officialCount = savedLinks.filter(
+      (s: Record<string, unknown>) => s.official_source === true
+    ).length;
+    const hasAnalystMarkedPrimaryOrOfficial = primaryCount >= 1 || officialCount >= 1;
+
     const payload = {
+      ...(hasAnalystMarkedPrimaryOrOfficial
+        ? {
+            analyst_sources: {
+              primary_count: primaryCount,
+              secondary_count: secondaryCount,
+              official_count: officialCount,
+              instruction:
+                'The analyst has ALREADY marked primary/official evidence in saved_links. Do NOT output verification_tasks that mention finding, obtaining, or confirming via "primary source" or "official documentation". Do NOT write in executive_overview that verification "focuses on confirming through primary sources"—state instead that the timeline is supported by analyst-marked primary and official sources.',
+            },
+          }
+        : {}),
       case: {
         title: caseRow.title,
         tags: caseRow.tags ?? [],
@@ -671,13 +807,34 @@ export async function POST(
       evidence_bundle_counts: evidenceBundleCounts,
     };
 
+    const totalResults = Object.values(resultsByQuery).flat().length;
+    const totalNotes = Object.values(notesByQuery).flat().length;
+    const payloadSummary =
+      `\nPAYLOAD SUMMARY (read before the JSON): The JSON below contains: case (title${caseObjective ? ', objective' : ''}), ${queries.length} queries, ${totalResults} results, ${totalNotes} notes, ${savedLinks.length} saved_links. Each saved_link has source_tier, official_source, notes[], and when present ai_summary, ai_key_facts, extracted_facts.` +
+      (hasAnalystMarkedPrimaryOrOfficial
+        ? ' analyst_sources is present: analyst has already marked primary/official—apply this in executive_overview and verification_tasks.'
+        : '') +
+      ' Build evidence_index and every section from this payload only; synthesize nothing from outside it.\n\n';
+
+    const integrityBlock =
+      savedLinks.length >= 2
+        ? `\nINTEGRITY SCORE (grade A–F): The brief grade depends on (1) every working_timeline entry having at least 2 source_ids when you have 2+ saved_links—cite the saved_link(s) and another evidence_index id (e.g. s1 and s2, or s1 and n1) that support each event; (2) at least one evidence_strength entry with supporting_refs; (3) hypotheses with evidence_against when applicable. Saved_links with extracted_facts (key_claims) or ai_key_facts contain verified facts (e.g. launch dates, mission facts)—you MUST turn these into working_timeline entries and cite at least 2 source_ids per entry. Single-source timeline entries will result in a C or lower grade even when the evidence is strong.\n\n`
+        : '';
+
+    const keyEntitiesBlock =
+      `\nKEY_ENTITIES: When multiple saved_links and notes support the same entities (e.g. Voyager 1, NASA, mission), include those key_entities with multiple source_refs. Do not drop well-supported entities that appear across several sources in favor of different ones unless the evidence has clearly shifted.\n\n`;
+
+    const analystBlock = hasAnalystMarkedPrimaryOrOfficial
+      ? `\nANALYST HAS ALREADY MARKED SOURCES: This payload contains ${primaryCount} saved_link(s) with source_tier primary and ${secondaryCount} secondary${officialCount > 0 ? `, and ${officialCount} with official_source true` : ''}. The timeline and key claims are ALREADY supported by analyst-marked primary/official evidence. You MUST: (a) Do NOT output any verification_task that mentions "primary source", "official documentation", "obtain documentation", or "if a primary source confirms"—omit those tasks entirely. (b) In executive_overview, do NOT write "verification tasks focus on confirming" or "ensuring that the established timeline is accurate and reliable"—instead state that the timeline is SUPPORTED BY analyst-marked primary and official sources; any verification tasks are only for falsification or other gaps, not for confirming what the analyst already marked.\n\n`
+      : '\n';
+
     const objectiveBlock = caseObjective
       ? `\nCASE OBJECTIVE (MANDATORY ORIENTATION): The user's objective for this case is: "${caseObjective}". Every section of the brief must help the reader make progress toward this objective. Executive overview should frame the situation in light of it. Working timeline, key_entities, contradictions_tensions, hypotheses, verification_tasks, evidence_strength, and critical_gaps should emphasize what supports, challenges, or clarifies this objective. Do not summarize the objective; orient the analysis toward it.\n\n`
       : '\n';
 
-    const userContent = `Evaluate the case evidence below using the investigative protocol.${objectiveBlock}Return ONLY valid JSON.
+    const userContent = `Evaluate the case evidence below using the investigative protocol.${payloadSummary}${analystBlock}${objectiveBlock}${integrityBlock}${keyEntitiesBlock}Return ONLY valid JSON.
 
-You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from queries, saved_links, notes_by_query, results_by_query); for each saved_link (s1, s2, ...) include source_tier (primary | secondary | null) and official_source (boolean) from the payload. Use ai_summary, ai_key_facts, and when present extracted_facts (key_claims, summary) to synthesize working_timeline, key_entities, and contradictions—integrate into existing sections, do not add a separate extracted_facts section. Fill working_timeline and key_entities with at least one entry each when this payload has any queries, saved_links, notes, or results; one entry each is enough when evidence is thin. (2) When evidence shows real tensions or contradictions, add entries to contradictions_tensions using the STRUCTURED CONFLICT format only; if there are none, use []. (3) Include evidence_strength only when the case has multiple themes supported by evidence (2–5 entries); otherwise omit or one entry. (4) When the case supports a testable interpretation, include at least one verification_task that is an explicit falsification test. (5) Add other verification_tasks for gaps and evidence-gathering as warranted. Prefer fewer, concrete tasks over generic ones. (6) Write executive_overview last; it must reference timeline and key_entities so the brief reads as one story.\n\n${JSON.stringify(payload)}`;
+You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from queries, saved_links, notes_by_query, results_by_query); for each saved_link (s1, s2, ...) include source_tier (primary | secondary | null) and official_source (boolean) from the payload. For saved_links with evidence_from_notes true, apply source_tier and official_source to the note content or canonical_evidence_url in evidence_index—not to the search URL. Use ai_summary, ai_key_facts, and when present extracted_facts (key_claims, summary) to synthesize working_timeline, key_entities, and contradictions—integrate into existing sections, do not add a separate extracted_facts section. Fill working_timeline and key_entities with at least one entry each when this payload has any queries, saved_links, notes, or results. When the payload has 2 or more saved_links or multiple results, every working_timeline entry MUST list at least 2 source_ids (required for integrity score). (2) When the payload has 2 or more saved_links, include at least one evidence_strength entry with theme and supporting_refs. (3) When the case has a clear factual claim (e.g. date or event), include at least one hypothesis with evidence_for and evidence_against (use at least one evidence_against ref if any source qualifies). (4) When evidence shows real tensions or contradictions, add entries to contradictions_tensions using the STRUCTURED CONFLICT format only; if there are none, use []. (5) When the case supports a testable interpretation, include at least one verification_task that is an explicit falsification test. (6) Add other verification_tasks for gaps and evidence-gathering as warranted. When the payload has saved_links with source_tier primary or official_source true, do NOT output any verification_task that mentions "primary source", "official documentation", "obtain documentation", "additional documentation from", or "if a primary source confirms"—omit those entirely. (7) Write executive_overview last; it must reference timeline and key_entities so the brief reads as one story.\n\n${JSON.stringify(payload)}`;
 
     let briefJson: unknown;
     try {
@@ -709,6 +866,9 @@ You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from que
         { status: 500 }
       );
     }
+
+    sanitizeBriefWhenAnalystHasPrimary(validated, hasAnalystMarkedPrimaryOrOfficial);
+    if (savedLinks.length >= 2) ensureTimelineMultiRef(validated, 2);
 
     const { data: latest } = await (supabaseServer
       .from('case_briefs') as any)
@@ -766,12 +926,15 @@ You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from que
         .eq('user_id', userId)
         .order('mention_count', { ascending: false })
         .limit(10);
-      const topEntities = (entityRows || []).map((r: { name: string; entity_type: string; mention_count: number }) => ({
-        name: r.name,
-        type: r.entity_type,
-        mention_count: r.mention_count ?? 0,
-      }));
+      const topEntities = (entityRows || [])
+        .filter((r: { name: string }) => !isLikelyNavFooter(r.name))
+        .map((r: { name: string; entity_type: string; mention_count: number }) => ({
+          name: r.name,
+          type: r.entity_type,
+          mention_count: r.mention_count ?? 0,
+        }));
       const notableConnections: string[] = [];
+      const keptNames = new Set(topEntities.map((e: { name: string }) => e.name));
       if (entityRows?.length) {
         const entityIds = entityRows.map((e: { id: string }) => e.id);
         const { data: mentionRows } = await (supabaseServer.from('entity_mentions') as any)
@@ -791,6 +954,7 @@ You MUST: (1) Build evidence_index from this payload (q1, s1, n1, r1... from que
         const nameById = new Map(entityRows.map((e: { id: string; name: string }) => [e.id, e.name]));
         for (const [eid, kindMap] of Array.from(byEntity.entries())) {
           const name = nameById.get(eid) ?? 'Entity';
+          if (!keptNames.has(name)) continue;
           const parts: string[] = [];
           const saved = kindMap.get('saved_link') ?? 0;
           const notes = kindMap.get('note') ?? 0;

@@ -185,6 +185,8 @@ export function buildBriefPdf(
         TIMELINE_COLS
       );
     }
+    y += 1;
+    y = addWrappedText(doc, '✓ = I\'ve confirmed (audit only; does not change score).', MARGIN, y, 8);
     y += 2;
     y = addWrappedText(doc, 'Evidence details:', MARGIN, y, 9);
     y += 1;

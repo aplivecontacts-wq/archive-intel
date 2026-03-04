@@ -13,6 +13,33 @@ const CAP_PHRASE_REGEX = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/g;
 const MAX_CAP_PHRASE_WORDS = 4;
 const MAX_ENTITIES_PER_TYPE = 50;
 
+/** Lowercased nav/footer/menu phrases to exclude from capitalized-phrase entities. */
+const NAV_FOOTER_BLOCKLIST = new Set([
+  'get involved', 'contact us', 'our history', 'doing business', 'images videos', 'multimedia highlights',
+  'careers', 'internships', 'facilities', 'directorates', 'everyone requests', 'impacts centers',
+  'study space', 'space weather', 'students for educators for', 'universities for professionals science',
+  'facilities directorates organizations people', 'careers internships our history', 'get involved contact',
+  'ciencia aeron', 'ciencias terrestres sistema solar', 'universo news', 'caught blowing bubbles',
+  'multimedia', 'highlights', 'sistema solar', 'for educators for', 'for professionals science',
+  'doing business', 'our history', 'contact', 'images', 'videos', 'everyone', 'requests', 'impacts', 'centers',
+  'where are voyager', 'science explore search news', 'events news', 'events recently published video',
+  'audio blogs newsletters social', 'apps podcasts', 'search suggested searches climate', 'change artemis expedition',
+  'international space station view', 'home missions humans', 'suggested searches', 'recently published video',
+]);
+
+/** True if the phrase looks like nav/footer/menu text rather than a real entity. Exported for display-time filtering (e.g. Top Entities). */
+export function isLikelyNavFooter(name: string): boolean {
+  const lower = name.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (lower.length < 4) return true;
+  if (NAV_FOOTER_BLOCKLIST.has(lower)) return true;
+  for (const block of NAV_FOOTER_BLOCKLIST) {
+    if (block.length >= 6 && lower.includes(block)) return true;
+  }
+  if (/\bfor\s+\w+\s+for\b/.test(lower)) return true;
+  if (/^(get|our|all|the)\s+/i.test(lower) && lower.split(/\s+/).length <= 3) return true;
+  return false;
+}
+
 function normalizeName(name: string): string {
   return name.trim().replace(/\s+/g, ' ');
 }
@@ -57,7 +84,7 @@ function extractCapitalizedPhrases(text: string): ExtractedEntity[] {
     const words = raw.split(/\s+/).filter(Boolean);
     if (words.length < 2 || words.length > MAX_CAP_PHRASE_WORDS) continue;
     const name = normalizeName(raw);
-    if (name.length >= 3 && name.length <= 50 && !seen.has(name)) {
+    if (name.length >= 3 && name.length <= 50 && !seen.has(name) && !isLikelyNavFooter(name)) {
       seen.add(name);
       out.push({ name, type: 'other' });
     }

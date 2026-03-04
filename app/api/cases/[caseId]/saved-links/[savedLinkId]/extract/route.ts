@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { canonicalizeUrl, isValidUrl } from '@/lib/url-utils';
+import { stripLeadingGovBoilerplate } from '@/lib/content-utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,6 +47,16 @@ function isSearchEngineUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Extract URLs from text; return first non-search URL or null. */
+function extractFirstArticleUrlFromNotes(text: string): string | null {
+  const matches = text.match(/https?:\/\/[^\s<>"']+/gi) || [];
+  for (const raw of matches) {
+    const u = raw.replace(/[.,;:!?)]+$/, '').trim();
+    if (u.length >= 10 && !isSearchEngineUrl(u)) return u;
+  }
+  return null;
 }
 
 /** True if URL or page content looks like a search results / link-heavy page (not a specific article). */
@@ -251,7 +262,7 @@ export async function POST(
       return NextResponse.json({ ok: false, error: errMsg }, { status: 200 });
     }
 
-    // Rule: if the saved link is a search engine URL, do not fetch it. Use notes only.
+    // Rule: if the saved link is a search engine URL, do not fetch it. Use notes; optionally fetch first article URL from notes.
     if (isSearchEngineUrl(url)) {
       const { data: notesRows } = await (supabaseServer.from('saved_link_notes') as any)
         .select('content')
@@ -261,9 +272,10 @@ export async function POST(
         ? notesRows.map((r: { content?: string | null }) => (r?.content != null ? String(r.content).trim() : '')).filter(Boolean)
         : [];
       const notesBody = noteContents.join('\n\n').trim();
+      const firstArticleUrl = extractFirstArticleUrlFromNotes(notesBody);
       const errMsg =
         'This is a search results page. Add the specific article URLs or paste content in the Notes section for this saved link, then run Extract key facts again.';
-      if (notesBody.length < 50) {
+      if (notesBody.length < 50 && !firstArticleUrl) {
         await (supabaseServer.from('saved_links') as any)
           .update({
             extraction_error: errMsg,
@@ -275,10 +287,36 @@ export async function POST(
           .eq('user_id', userId);
         return NextResponse.json({ ok: false, error: errMsg }, { status: 200 });
       }
+      let textForExtraction = notesBody;
+      if (firstArticleUrl) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+          const res = await fetch(firstArticleUrl, {
+            signal: controller.signal,
+            cache: 'no-store',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+          });
+          clearTimeout(timeout);
+          if (res.ok) {
+            const html = await res.text();
+            let stripped = stripHtml(html).trim();
+            if (stripped.length >= 100) {
+              if (firstArticleUrl.toLowerCase().includes('.gov')) stripped = stripLeadingGovBoilerplate(stripped);
+              textForExtraction = stripped;
+            }
+          }
+        } catch (e) {
+          if (process.env.NODE_ENV === 'development') console.warn('[extract] fetch note URL', firstArticleUrl, e);
+        }
+      }
       const notesTruncated =
-        Buffer.byteLength(notesBody, 'utf8') > MAX_TEXT_BYTES
-          ? Buffer.from(notesBody, 'utf8').subarray(0, MAX_TEXT_BYTES).toString('utf8')
-          : notesBody;
+        Buffer.byteLength(textForExtraction, 'utf8') > MAX_TEXT_BYTES
+          ? Buffer.from(textForExtraction, 'utf8').subarray(0, MAX_TEXT_BYTES).toString('utf8')
+          : textForExtraction;
       const extracted_facts = extractFactsFromText(notesTruncated);
       const { error: updateErr } = await (supabaseServer.from('saved_links') as any)
         .update({
@@ -396,7 +434,10 @@ export async function POST(
     }
 
     if (typeof rawHtml !== 'string') throw new Error('Fetch failed');
-    const extractedText = stripHtml(rawHtml);
+    let extractedText = stripHtml(rawHtml);
+    if (url.toLowerCase().includes('.gov') && extractedText.length > 200) {
+      extractedText = stripLeadingGovBoilerplate(extractedText);
+    }
     const truncated =
       Buffer.byteLength(extractedText, 'utf8') > MAX_TEXT_BYTES
         ? Buffer.from(extractedText, 'utf8').subarray(0, MAX_TEXT_BYTES).toString('utf8')

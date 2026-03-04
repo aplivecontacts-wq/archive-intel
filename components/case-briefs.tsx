@@ -589,10 +589,6 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
                 <IntelDashboard
                   briefJson={bj}
                   caseId={caseId}
-                  entities={entities}
-                  onOpenEntityMentions={onOpenEntityMentions}
-                  tasks={tasks}
-                  fetchTasks={fetchTasks}
                 />
                 {Array.isArray(bj.changes_since_last_version) && bj.changes_since_last_version.length > 0 && (
                   <Card className="bg-white border-emerald-200">
@@ -627,18 +623,6 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
                     </CardContent>
                   </Card>
                 )}
-                {typeof bj.executive_overview === 'string' && (
-                  <Card className="bg-white border-emerald-200">
-                    <CardContent className="pt-4">
-                      <h3 className="text-emerald-700 font-semibold mb-2">
-                        Executive Overview
-                      </h3>
-                      <p className="text-gray-700 whitespace-pre-wrap">
-                        {bj.executive_overview}
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
                 <Card className="bg-white border-emerald-200">
                   <CardContent className="pt-4">
                     <h3 className="text-emerald-700 font-semibold mb-2">
@@ -662,7 +646,10 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
                                       [{String(item.confidence ?? '')} / {String(item.basis ?? '')}]
                                     </span>
                                   </div>
-                                  <label className="flex items-center gap-1.5 shrink-0 text-xs text-emerald-700 cursor-pointer">
+                                  <label
+                                    className="flex items-center gap-1.5 shrink-0 text-xs text-emerald-700 cursor-pointer"
+                                    title="Marks that you've confirmed this event. Does not change the brief score; shown as ✓ in PDF export."
+                                  >
                                     <Checkbox
                                       checked={item.verified === true}
                                       disabled={savingVerifiedIndex === i}
@@ -670,9 +657,9 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
                                         viewBrief &&
                                         handleTimelineVerifiedChange(viewBrief.id, i, checked === true)
                                       }
-                                      aria-label={`Verified (User) for timeline item ${i + 1}`}
+                                      aria-label={`I've confirmed timeline item ${i + 1}`}
                                     />
-                                    <span>Verified (User)</span>
+                                    <span>I've confirmed</span>
                                   </label>
                                 </div>
                                 {refs.length > 0 && (
@@ -1377,7 +1364,7 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
                   <p className="text-gray-600 text-xs font-medium mb-1 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" aria-hidden />What to add</p>
                   <p className="text-gray-700 text-xs mb-2">Events with time window, event description, confidence (high/medium/low), basis (public/note/confidential/unverified), and source refs. Add evidence; the AI turns it into timeline entries.</p>
                   <p className="text-gray-600 text-xs font-medium mb-1 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" aria-hidden />How to use it</p>
-                  <p className="text-gray-700 text-xs mb-2">Check that key events are there and confidence matches the evidence; mark Verified in the UI when you have confirmed.</p>
+                  <p className="text-gray-700 text-xs mb-2">Check that key events are there and confidence matches the evidence; use "I've confirmed" when you have verified an event (audit only; does not change the score; shown in PDF).</p>
                   <p className="text-gray-600 text-xs font-medium mb-1 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden />Why it matters</p>
                   <p className="text-gray-700 text-xs">Chronology is the backbone; weak or unsupported events get flagged in coherence alerts.</p>
                 </CardContent>

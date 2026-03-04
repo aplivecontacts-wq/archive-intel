@@ -16,6 +16,33 @@ function normalizeTitle(s: string): string {
     .replace(/\s+/g, ' ');
 }
 
+/** True if the brief already has analyst-marked primary or official in evidence_index. */
+function briefHasPrimaryOrOfficial(evidenceIndex: Record<string, unknown> | null): boolean {
+  if (!evidenceIndex || typeof evidenceIndex !== 'object' || Array.isArray(evidenceIndex)) return false;
+  for (const entry of Object.values(evidenceIndex)) {
+    const e = entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : {};
+    if (e.source_tier === 'primary' || e.official_source === true) return true;
+  }
+  return false;
+}
+
+/** True if the task title reads like "find primary/official" or "obtain documentation" — skip when brief already has P/O. */
+function isRedundantPrimaryOfficialTask(title: string): boolean {
+  const lower = title.trim().toLowerCase();
+  if (lower.length < 20) return false;
+  const patterns = [
+    /primary\s+source\s+(document\s+)?confirms?/,
+    /obtain\s+(additional\s+)?documentation/,
+    /additional\s+documentation\s+from/,
+    /locate\s+(any\s+)?(official\s+)?(NASA\s+)?documentation/,
+    /official\s+NASA\s+documentation/,
+    /documentation\s+from\s+NASA/,
+    /find\s+(a\s+)?primary\s+source/,
+    /locate\s+.*primary\s+source/,
+  ];
+  return patterns.some((re) => re.test(lower));
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { caseId: string } }
@@ -83,11 +110,16 @@ export async function POST(
     );
 
     const toInsert: { title: string; detail: string | null; priority: string }[] = [];
+    const evidenceIndex = (bj.evidence_index != null && typeof bj.evidence_index === 'object' && !Array.isArray(bj.evidence_index))
+      ? (bj.evidence_index as Record<string, unknown>)
+      : null;
+    const hasPrimaryOrOfficial = briefHasPrimaryOrOfficial(evidenceIndex);
 
     for (const vt of verificationTasks) {
       const task = vt && typeof vt === 'object' ? vt as Record<string, unknown> : {};
       const title = typeof task.task === 'string' ? task.task.trim() : '';
       if (!title || existingNorm.has(normalizeTitle(title))) continue;
+      if (hasPrimaryOrOfficial && isRedundantPrimaryOfficialTask(title)) continue;
       existingNorm.add(normalizeTitle(title));
       toInsert.push({
         title,

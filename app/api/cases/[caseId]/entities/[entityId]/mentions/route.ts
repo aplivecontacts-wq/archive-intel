@@ -58,7 +58,27 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ entity, mentions: mentions ?? [] });
+    const list = mentions ?? [];
+    const savedLinkIds = list.filter((m: { evidence_kind: string }) => m.evidence_kind === 'saved_link').map((m: { evidence_id: string }) => m.evidence_id);
+    let urlByEvidenceId: Record<string, string> = {};
+    if (savedLinkIds.length > 0) {
+      const { data: links } = await (supabaseServer.from('saved_links') as any)
+        .select('id, url')
+        .eq('user_id', userId)
+        .in('id', savedLinkIds);
+      if (links) {
+        for (const row of links) {
+          if (row.url) urlByEvidenceId[row.id] = row.url;
+        }
+      }
+    }
+
+    const mentionsWithLinks = list.map((m: { evidence_id: string; evidence_kind: string }) => ({
+      ...m,
+      link_url: m.evidence_kind === 'saved_link' ? (urlByEvidenceId[m.evidence_id] ?? null) : null,
+    }));
+
+    return NextResponse.json({ entity, mentions: mentionsWithLinks });
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Failed to fetch mentions';
     if (process.env.NODE_ENV === 'development') console.error('[entities/mentions]', err);

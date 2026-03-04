@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { SidebarCases } from '@/components/sidebar-cases';
 import { SearchBar } from '@/components/search-bar';
 import { QueryList } from '@/components/query-list';
@@ -21,7 +21,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { CaseBriefs } from '@/components/case-briefs';
 import { detectInputType } from '@/lib/query-utils';
-import { Menu, Loader2, Network, Pencil, Coins } from 'lucide-react';
+import { estimateTaskImpact } from '@/lib/task-impact';
+import { Menu, Loader2, Network, Pencil, Coins, ExternalLink, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Case {
@@ -56,6 +57,7 @@ interface EntityMention {
   query_id: string | null;
   context_snippet: string | null;
   created_at: string;
+  link_url?: string | null;
 }
 
 interface CaseTask {
@@ -69,6 +71,7 @@ interface CaseTask {
 
 export default function CasePage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const caseId = params.caseId as string;
 
   const [cases, setCases] = useState<Case[]>([]);
@@ -85,6 +88,8 @@ export default function CasePage() {
   const [tasks, setTasks] = useState<CaseTask[]>([]);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [taskFilter, setTaskFilter] = useState<'open' | 'done'>('open');
+  const [taskDoneWarningOpen, setTaskDoneWarningOpen] = useState(false);
+  const [taskDoneWarningTaskId, setTaskDoneWarningTaskId] = useState<string | null>(null);
   const [editCaseOpen, setEditCaseOpen] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editObjective, setEditObjective] = useState('');
@@ -227,6 +232,13 @@ export default function CasePage() {
       return () => clearInterval(interval);
     }
   }, [queries, fetchQueries]);
+
+  const queryIdFromUrl = searchParams.get('queryId');
+  useEffect(() => {
+    if (queryIdFromUrl && queries.length > 0 && queries.some((q) => q.id === queryIdFromUrl)) {
+      setSelectedQueryId(queryIdFromUrl);
+    }
+  }, [queryIdFromUrl, queries]);
 
   const selectedQuery = queries.find((q) => q.id === selectedQueryId);
 
@@ -472,50 +484,110 @@ export default function CasePage() {
                     <p className="text-gray-400 font-mono text-xs">No tasks.</p>
                   ) : (
                     <ul className="space-y-1.5">
-                      {filtered.map((t) => (
-                        <li key={t.id} className="flex items-start gap-2 text-xs font-mono">
-                          {taskFilter === 'open' && (
-                            <input
-                              type="checkbox"
-                              className="mt-0.5"
-                              onChange={async () => {
-                                const res = await fetch(`/api/cases/${caseId}/tasks/${t.id}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ status: 'done' }),
-                                });
-                                if (res.ok) fetchTasks();
-                                else toast.error('Failed to update task');
-                              }}
-                            />
-                          )}
-                          <span className={`flex-1 min-w-0 ${taskFilter === 'done' ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
-                            {t.title}
-                          </span>
-                          {taskFilter === 'done' && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const res = await fetch(`/api/cases/${caseId}/tasks/${t.id}`, {
-                                  method: 'PATCH',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ status: 'open' }),
-                                });
-                                if (res.ok) fetchTasks();
-                                else toast.error('Failed to undo');
-                              }}
-                              className="shrink-0 text-emerald-600 hover:underline"
-                            >
-                              Undo
-                            </button>
-                          )}
-                        </li>
-                      ))}
+                      {filtered.map((t) => {
+                        const impact = estimateTaskImpact(t.title);
+                        return (
+                          <li key={t.id} className="flex items-start gap-2 text-xs font-mono">
+                            {taskFilter === 'open' && (
+                              <input
+                                type="checkbox"
+                                className="mt-0.5 shrink-0"
+                                onChange={async () => {
+                                  if (impact.sign === '-') {
+                                    setTaskDoneWarningTaskId(t.id);
+                                    setTaskDoneWarningOpen(true);
+                                    return;
+                                  }
+                                  const res = await fetch(`/api/cases/${caseId}/tasks/${t.id}`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: 'done' }),
+                                  });
+                                  if (res.ok) fetchTasks();
+                                  else toast.error('Failed to update task');
+                                }}
+                              />
+                            )}
+                            <span className={`flex-1 min-w-0 ${taskFilter === 'done' ? 'text-gray-500 line-through' : 'text-gray-700'}`}>
+                              {t.title}
+                            </span>
+                            {taskFilter === 'open' && (
+                              <span
+                                className={`shrink-0 font-semibold w-6 text-right ${impact.sign === '+' ? 'text-emerald-600' : 'text-red-600'}`}
+                                title={impact.sign === '+' ? `Completing this could add up to ${impact.points} pts` : 'Falsification check'}
+                              >
+                                {impact.sign}{impact.points}
+                              </span>
+                            )}
+                            {taskFilter === 'done' && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const res = await fetch(`/api/cases/${caseId}/tasks/${t.id}`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ status: 'open' }),
+                                  });
+                                  if (res.ok) fetchTasks();
+                                  else toast.error('Failed to undo');
+                                }}
+                                className="shrink-0 text-emerald-600 hover:underline"
+                              >
+                                Undo
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
                     </ul>
                   );
                 })()}
               </CardContent>
             </Card>
+
+            <Dialog open={taskDoneWarningOpen} onOpenChange={(open) => { setTaskDoneWarningOpen(open); if (!open) setTaskDoneWarningTaskId(null); }}>
+              <DialogContent className="bg-white border-emerald-200 max-w-sm">
+                <DialogHeader>
+                  <DialogTitle className="text-amber-700 font-mono text-sm">Warning</DialogTitle>
+                  <DialogDescription className="text-gray-600 font-mono text-xs">
+                    This may decrease your score if done. Mark as done anyway?
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="font-mono text-xs border-gray-300"
+                    onClick={() => { setTaskDoneWarningOpen(false); setTaskDoneWarningTaskId(null); }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="font-mono text-xs bg-emerald-600 hover:bg-emerald-700"
+                    onClick={async () => {
+                      if (!taskDoneWarningTaskId) return;
+                      const res = await fetch(`/api/cases/${caseId}/tasks/${taskDoneWarningTaskId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: 'done' }),
+                      });
+                      if (res.ok) {
+                        fetchTasks();
+                        setTaskDoneWarningOpen(false);
+                        setTaskDoneWarningTaskId(null);
+                      } else {
+                        toast.error('Failed to update task');
+                      }
+                    }}
+                  >
+                    Mark done anyway
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
             <Card className="bg-white border-emerald-200 shadow-sm">
               <CardHeader className="pb-2">
@@ -592,11 +664,57 @@ export default function CasePage() {
                 ) : (
                   <ul className="space-y-2">
                     {mentions.map((m) => (
-                      <li key={m.id} className="text-xs border border-gray-100 rounded p-2">
-                        <span className="font-mono text-emerald-600">{m.evidence_kind}</span>
-                        {m.context_snippet && (
-                          <p className="text-gray-600 mt-1 line-clamp-2">{m.context_snippet}</p>
-                        )}
+                      <li key={m.id} className="text-xs border border-gray-100 rounded p-2 flex gap-2 items-start">
+                        <div className="flex-1 min-w-0">
+                          <span className="font-mono text-emerald-600">{m.evidence_kind}</span>
+                          {m.context_snippet && (
+                            <p className="text-gray-600 mt-1 line-clamp-2">{m.context_snippet}</p>
+                          )}
+                          {m.link_url ? (
+                            <a
+                              href={m.link_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 mt-1 text-emerald-600 hover:underline font-mono"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Open
+                            </a>
+                          ) : m.query_id ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 mt-1 text-emerald-600 hover:underline font-mono"
+                              onClick={() => {
+                                setSelectedQueryId(m.query_id ?? undefined);
+                                setMentionsSheetOpen(false);
+                              }}
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                              Open query
+                            </button>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!selectedEntity) return;
+                            const res = await fetch(`/api/cases/${caseId}/entities/${selectedEntity.id}/mentions/${m.id}`, { method: 'DELETE' });
+                            if (res.ok) {
+                              toast.success('Mention removed');
+                              const data = await fetch(`/api/cases/${caseId}/entities/${selectedEntity.id}/mentions`).then((r) => r.json());
+                              setMentions(data.mentions ?? []);
+                              fetchEntities();
+                              if ((data.mentions ?? []).length === 0) setMentionsSheetOpen(false);
+                            } else {
+                              const err = await res.json();
+                              toast.error(err?.error ?? 'Failed to delete');
+                            }
+                          }}
+                          className="shrink-0 p-0.5 rounded text-red-600 hover:bg-red-50"
+                          aria-label={`Remove this mention`}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </li>
                     ))}
                   </ul>

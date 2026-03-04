@@ -93,5 +93,13 @@ export function computeIntegrityScore(brief: BriefJson): BriefIntegrityScore {
     grade,
     drivers: drivers.slice(0, 4),
     weak_points: weak_points.slice(0, 4),
+    breakdown: {
+      timeline_score,
+      contradiction_score,
+      gap_score,
+      credibility_score,
+      hypothesis_score,
+      depth_score,
+    },
   };
 }
