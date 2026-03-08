@@ -6,7 +6,6 @@ import { SidebarCases } from '@/components/sidebar-cases';
 import { SearchBar } from '@/components/search-bar';
 import { QueryList } from '@/components/query-list';
 import { ResultsTabs } from '@/components/results-tabs';
-import { VoiceMicFloat } from '@/components/voice-mic-float';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -109,7 +108,6 @@ export default function CasePage() {
   const [editDate, setEditDate] = useState('');
   const [editCategory, setEditCategory] = useState<'url' | 'username' | 'quote'>('quote');
   const [editQuerySaving, setEditQuerySaving] = useState(false);
-  const [voiceRefetchTrigger, setVoiceRefetchTrigger] = useState(0);
 
   const fetchQueries = useCallback(async () => {
     try {
@@ -944,21 +942,13 @@ export default function CasePage() {
                       </CardHeader>
                       <CardContent>
                         <ResultsTabs
-                          queryId={selectedQuery.id}
-                          queryStatus={selectedQuery.status}
-                          rawInput={selectedQuery.raw_input}
-                          caseId={caseId}
-                          voiceRefetchTrigger={voiceRefetchTrigger}
-                        />
-                      </CardContent>
-                    </Card>
-                    {caseId && selectedQuery && (
-                      <VoiceMicFloat
-                        caseId={caseId}
                         queryId={selectedQuery.id}
-                        onUploaded={() => setVoiceRefetchTrigger((v) => v + 1)}
+                        queryStatus={selectedQuery.status}
+                        rawInput={selectedQuery.raw_input}
+                        caseId={caseId}
                       />
-                    )}
+                    </CardContent>
+                    </Card>
                   </>
                 ) : (
                   <Card className="bg-white border-emerald-200 shadow-sm">

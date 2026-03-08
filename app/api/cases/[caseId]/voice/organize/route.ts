@@ -3,7 +3,20 @@ import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-server';
 import { transcribeAudio } from '@/lib/ai/whisper';
 
+export const dynamic = 'force-dynamic';
 const BUCKET = 'voice-notes';
+
+/** Get a Buffer from Supabase storage download (Blob, Buffer, or ArrayBuffer). */
+async function toBuffer(obj: unknown): Promise<Buffer> {
+  if (Buffer.isBuffer(obj)) return obj;
+  if (obj instanceof ArrayBuffer) return Buffer.from(obj);
+  if (obj instanceof Uint8Array) return Buffer.from(obj);
+  if (typeof (obj as Blob).arrayBuffer === 'function') {
+    const ab = await (obj as Blob).arrayBuffer();
+    return Buffer.from(ab);
+  }
+  throw new Error('Unsupported download result type');
+}
 
 async function ensureCaseAccess(caseId: string, userId: string) {
   const { data: caseRow, error } = await (supabaseServer.from('cases') as any)
@@ -43,21 +56,38 @@ export async function POST(
     const toTranscribe = (notes || []).filter((n: { transcript?: string | null }) => !n.transcript?.trim());
     const updated: string[] = [];
 
+    let firstError: string | null = null;
     for (const note of toTranscribe) {
-      const { data: obj } = await supabaseServer.storage.from(BUCKET).download(note.storage_path);
+      const { data: obj, error: downloadErr } = await supabaseServer.storage.from(BUCKET).download(note.storage_path);
+      if (downloadErr) {
+        firstError = firstError ?? `Download failed: ${downloadErr.message}`;
+        if (process.env.NODE_ENV === 'development') console.error('[voice/organize] download error:', downloadErr);
+        continue;
+      }
       if (!obj) continue;
-      const buffer = Buffer.from(await obj.arrayBuffer());
+      let buffer: Buffer;
       try {
-        const transcript = await transcribeAudio(buffer, (obj as { type?: string }).type ?? 'audio/webm');
+        buffer = await toBuffer(obj);
+      } catch (bufErr) {
+        firstError = firstError ?? (bufErr instanceof Error ? bufErr.message : 'Invalid download data');
+        continue;
+      }
+      try {
+        const transcript = await transcribeAudio(buffer, 'audio/webm');
         const { error: upErr } = await (supabaseServer.from('voice_notes') as any)
           .update({ transcript })
           .eq('id', note.id);
         if (!upErr) updated.push(note.id);
       } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Transcription failed';
+        firstError = firstError ?? msg;
         if (process.env.NODE_ENV === 'development') console.error('[voice/organize] transcribe error:', e);
       }
     }
 
+    if (toTranscribe.length > 0 && updated.length === 0 && firstError) {
+      return NextResponse.json({ error: firstError }, { status: 500 });
+    }
     return NextResponse.json({ organized: updated.length, transcribed: updated });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Organize failed';

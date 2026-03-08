@@ -100,7 +100,6 @@ interface ResultsTabsProps {
   queryStatus: 'running' | 'complete';
   rawInput?: string;
   caseId?: string;
-  voiceRefetchTrigger?: number;
 }
 
 function SavedLinkCard({
@@ -589,7 +588,7 @@ const linkifyText = (text: string) => {
 };
 
 
-export function ResultsTabs({ queryId, queryStatus, rawInput, caseId, voiceRefetchTrigger = 0 }: ResultsTabsProps) {
+export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsTabsProps) {
   const [results, setResults] = useState<Result[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
   const [noteContent, setNoteContent] = useState('');
@@ -602,6 +601,8 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId, voiceRefet
   const [addMoreSubmitting, setAddMoreSubmitting] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceUploading, setVoiceUploading] = useState(false);
+  const [expandedVoiceDetail, setExpandedVoiceDetail] = useState<{ url: string | null; transcript: string | null } | null>(null);
+  const [expandedVoiceDetailLoading, setExpandedVoiceDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [showDateJump, setShowDateJump] = useState(false);
@@ -663,7 +664,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId, voiceRefet
 
   useEffect(() => {
     fetchVoiceNotes();
-  }, [fetchVoiceNotes, voiceRefetchTrigger]);
+  }, [fetchVoiceNotes]);
 
   // Saved tab and badge: current-query items plus archive items for current case (query_id null, case_id match or legacy null).
   const scopedSavedLinks = useMemo(
@@ -1831,7 +1832,30 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId, voiceRefet
                     <button
                       type="button"
                       className="w-full text-left p-3 flex items-start gap-2"
-                      onClick={() => setExpandedVoiceId(expandedVoiceId === vn.id ? null : vn.id)}
+                      onClick={async () => {
+                        if (expandedVoiceId === vn.id) {
+                          setExpandedVoiceId(null);
+                          setExpandedVoiceDetail(null);
+                          return;
+                        }
+                        setExpandedVoiceId(vn.id);
+                        setExpandedVoiceDetailLoading(true);
+                        setExpandedVoiceDetail(null);
+                        try {
+                          const res = await fetch(`/api/cases/${caseId}/voice/${vn.id}`, { credentials: 'include' });
+                          if (res.ok) {
+                            const data = await res.json();
+                            setExpandedVoiceDetail({
+                              url: data.voiceNote?.url ?? null,
+                              transcript: data.voiceNote?.transcript ?? null,
+                            });
+                          }
+                        } catch {
+                          setExpandedVoiceDetail({ url: vn.url, transcript: vn.transcript });
+                        } finally {
+                          setExpandedVoiceDetailLoading(false);
+                        }
+                      }}
                     >
                       <span className="text-emerald-600 font-mono text-xs shrink-0">
                         {new Date(vn.recorded_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
@@ -1843,52 +1867,64 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId, voiceRefet
                     </button>
                     {expandedVoiceId === vn.id && (
                       <div className="border-t border-emerald-100 p-3 space-y-3 bg-emerald-50/30">
-                        {vn.url && (
-                          <audio controls src={vn.url} className="w-full max-w-md" />
+                        {expandedVoiceDetailLoading ? (
+                          <div className="flex items-center gap-2 text-emerald-700 font-mono text-sm">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading...
+                          </div>
+                        ) : (
+                          <>
+                            {(expandedVoiceDetail?.url ?? vn.url) && (
+                              <audio controls src={expandedVoiceDetail?.url ?? vn.url ?? undefined} className="w-full max-w-md" />
+                            )}
+                            {(expandedVoiceDetail?.transcript ?? vn.transcript)?.trim() && (
+                              <p className="text-sm text-gray-700 whitespace-pre-wrap">{expandedVoiceDetail?.transcript ?? vn.transcript}</p>
+                            )}
+                            {!(expandedVoiceDetail?.transcript ?? vn.transcript)?.trim() && !expandedVoiceDetailLoading && (
+                              <p className="text-xs text-gray-500 font-mono">No transcript yet. Press Organize to transcribe.</p>
+                            )}
+                            <div className="flex flex-wrap gap-2 items-center">
+                              <Input
+                                placeholder="Add more (text)..."
+                                value={addMoreText}
+                                onChange={(e) => setAddMoreText(e.target.value)}
+                                className="flex-1 min-w-[120px] border-emerald-200 font-mono text-sm"
+                              />
+                              <Button
+                                type="button"
+                                size="sm"
+                                disabled={addMoreSubmitting || !addMoreText.trim()}
+                                className="bg-emerald-600 hover:bg-emerald-700 font-mono"
+                                onClick={async () => {
+                                  if (!caseId || !addMoreText.trim()) return;
+                                  setAddMoreSubmitting(true);
+                                  try {
+                                    const res = await fetch(`/api/cases/${caseId}/voice/${vn.id}/add`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ text: addMoreText.trim() }),
+                                      credentials: 'include',
+                                    });
+                                    if (!res.ok) {
+                                      const d = await res.json().catch(() => ({}));
+                                      throw new Error(d?.error || 'Failed');
+                                    }
+                                    toast.success('Added');
+                                    setAddMoreText('');
+                                    fetchVoiceNotes();
+                                  } catch (e) {
+                                    toast.error(e instanceof Error ? e.message : 'Failed');
+                                  } finally {
+                                    setAddMoreSubmitting(false);
+                                  }
+                                }}
+                              >
+                                <Plus className="h-4 w-4 mr-1" />
+                                ADD MORE
+                              </Button>
+                            </div>
+                          </>
                         )}
-                        {vn.transcript?.trim() && (
-                          <p className="text-sm text-gray-700 whitespace-pre-wrap">{vn.transcript}</p>
-                        )}
-                        <div className="flex flex-wrap gap-2 items-center">
-                          <Input
-                            placeholder="Add more (text)..."
-                            value={addMoreText}
-                            onChange={(e) => setAddMoreText(e.target.value)}
-                            className="flex-1 min-w-[120px] border-emerald-200 font-mono text-sm"
-                          />
-                          <Button
-                            type="button"
-                            size="sm"
-                            disabled={addMoreSubmitting || !addMoreText.trim()}
-                            className="bg-emerald-600 hover:bg-emerald-700 font-mono"
-                            onClick={async () => {
-                              if (!caseId || !addMoreText.trim()) return;
-                              setAddMoreSubmitting(true);
-                              try {
-                                const res = await fetch(`/api/cases/${caseId}/voice/${vn.id}/add`, {
-                                  method: 'POST',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ text: addMoreText.trim() }),
-                                  credentials: 'include',
-                                });
-                                if (!res.ok) {
-                                  const d = await res.json().catch(() => ({}));
-                                  throw new Error(d?.error || 'Failed');
-                                }
-                                toast.success('Added');
-                                setAddMoreText('');
-                                fetchVoiceNotes();
-                              } catch (e) {
-                                toast.error(e instanceof Error ? e.message : 'Failed');
-                              } finally {
-                                setAddMoreSubmitting(false);
-                              }
-                            }}
-                          >
-                            <Plus className="h-4 w-4 mr-1" />
-                            ADD MORE
-                          </Button>
-                        </div>
                       </div>
                     )}
                   </li>
