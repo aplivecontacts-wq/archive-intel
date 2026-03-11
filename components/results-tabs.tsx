@@ -601,8 +601,15 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
   const [addMoreSubmitting, setAddMoreSubmitting] = useState(false);
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceUploading, setVoiceUploading] = useState(false);
-  const [expandedVoiceDetail, setExpandedVoiceDetail] = useState<{ url: string | null; transcript: string | null } | null>(null);
+  const [expandedVoiceDetail, setExpandedVoiceDetail] = useState<{
+    url: string | null;
+    transcript: string | null;
+    addenda?: Array<{ id: string; kind: string; text_content?: string | null; transcript?: string | null; created_at: string }>;
+  } | null>(null);
   const [expandedVoiceDetailLoading, setExpandedVoiceDetailLoading] = useState(false);
+  const [voiceAudioError, setVoiceAudioError] = useState(false);
+  const [deletingVoiceNoteId, setDeletingVoiceNoteId] = useState<string | null>(null);
+  const [deletingAddendumId, setDeletingAddendumId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [showDateJump, setShowDateJump] = useState(false);
@@ -1726,17 +1733,20 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                   }
                   try {
                     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    const recorder = new MediaRecorder(stream);
+                    const recMime = (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported?.('audio/mp4')) ? 'audio/mp4' : 'audio/webm';
+                    const recorder = new MediaRecorder(stream, recMime ? { mimeType: recMime } : undefined);
                     const chunks: Blob[] = [];
                     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
                     recorder.onstop = async () => {
                       stream.getTracks().forEach((t) => t.stop());
-                      const blob = new Blob(chunks, { type: 'audio/webm' });
+                      const mimeType = recMime;
+                      const ext = mimeType === 'audio/mp4' ? 'm4a' : 'webm';
+                      const blob = new Blob(chunks, { type: mimeType });
                       setVoiceUploading(true);
                       try {
                         const form = new FormData();
                         form.append('queryId', queryId);
-                        form.append('file', blob, 'recording.webm');
+                        form.append('file', blob, `recording.${ext}`);
                         const res = await fetch(`/api/cases/${caseId}/voice`, {
                           method: 'POST',
                           body: form,
@@ -1841,6 +1851,7 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                         setExpandedVoiceId(vn.id);
                         setExpandedVoiceDetailLoading(true);
                         setExpandedVoiceDetail(null);
+                        setVoiceAudioError(false);
                         try {
                           const res = await fetch(`/api/cases/${caseId}/voice/${vn.id}`, { credentials: 'include' });
                           if (res.ok) {
@@ -1848,10 +1859,11 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                             setExpandedVoiceDetail({
                               url: data.voiceNote?.url ?? null,
                               transcript: data.voiceNote?.transcript ?? null,
+                              addenda: data.addenda ?? [],
                             });
                           }
                         } catch {
-                          setExpandedVoiceDetail({ url: vn.url, transcript: vn.transcript });
+                          setExpandedVoiceDetail({ url: vn.url, transcript: vn.transcript, addenda: [] });
                         } finally {
                           setExpandedVoiceDetailLoading(false);
                         }
@@ -1874,8 +1886,52 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                           </div>
                         ) : (
                           <>
+                            <div className="flex items-center justify-end">
+                              <button
+                                type="button"
+                                aria-label="Delete voice note"
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-mono text-gray-500 hover:text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                disabled={deletingVoiceNoteId === vn.id}
+                                onClick={async () => {
+                                  if (!caseId || deletingVoiceNoteId) return;
+                                  if (!confirm('Delete this voice note and all its follow-ups?')) return;
+                                  setDeletingVoiceNoteId(vn.id);
+                                  try {
+                                    const res = await fetch(`/api/cases/${caseId}/voice/${vn.id}`, { method: 'DELETE', credentials: 'include' });
+                                    if (!res.ok) {
+                                      const d = await res.json().catch(() => ({}));
+                                      throw new Error(d?.error || 'Failed');
+                                    }
+                                    toast.success('Voice note deleted');
+                                    setExpandedVoiceId(null);
+                                    setExpandedVoiceDetail(null);
+                                    fetchVoiceNotes();
+                                  } catch (e) {
+                                    toast.error(e instanceof Error ? e.message : 'Failed');
+                                  } finally {
+                                    setDeletingVoiceNoteId(null);
+                                  }
+                                }}
+                              >
+                                {deletingVoiceNoteId === vn.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                <span>Delete note</span>
+                              </button>
+                            </div>
                             {(expandedVoiceDetail?.url ?? vn.url) && (
-                              <audio controls src={expandedVoiceDetail?.url ?? vn.url ?? undefined} className="w-full max-w-md" />
+                              <>
+                                <audio
+                                  controls
+                                  src={expandedVoiceDetail?.url ?? vn.url ?? undefined}
+                                  className="w-full max-w-md"
+                                  onError={() => setVoiceAudioError(true)}
+                                  onCanPlay={() => setVoiceAudioError(false)}
+                                />
+                                {voiceAudioError && (
+                                  <p className="text-xs text-amber-700 font-mono mt-1">
+                                    Playback failed on this device. Try on desktop or a different browser.
+                                  </p>
+                                )}
+                              </>
                             )}
                             {(expandedVoiceDetail?.transcript ?? vn.transcript)?.trim() && (
                               <p className="text-sm text-gray-700 whitespace-pre-wrap">{expandedVoiceDetail?.transcript ?? vn.transcript}</p>
@@ -1883,9 +1939,60 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                             {!(expandedVoiceDetail?.transcript ?? vn.transcript)?.trim() && !expandedVoiceDetailLoading && (
                               <p className="text-xs text-gray-500 font-mono">No transcript yet. Press Organize to transcribe.</p>
                             )}
-                            <div className="flex flex-wrap gap-2 items-center">
+                            {(expandedVoiceDetail?.addenda?.length ?? 0) > 0 && (
+                              <div className="space-y-2 pt-2 border-t border-emerald-200">
+                                <p className="text-xs font-mono font-semibold text-emerald-700">ADDED FOLLOW-UPS</p>
+                                {(expandedVoiceDetail?.addenda ?? []).map((a) => (
+                                  <div key={a.id} className="flex items-start gap-2 text-sm text-gray-700 bg-white/60 rounded p-2 border border-emerald-100">
+                                    <div className="flex-1 min-w-0">
+                                      {(a.text_content ?? a.transcript ?? '').trim() && (
+                                        <p className="whitespace-pre-wrap">{(a.text_content ?? a.transcript ?? '').trim()}</p>
+                                      )}
+                                      <p className="text-xs text-gray-500 font-mono mt-1">
+                                        {new Date(a.created_at).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}
+                                      </p>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      aria-label="Delete follow-up"
+                                      className="shrink-0 p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                                      disabled={deletingAddendumId === a.id}
+                                      onClick={async () => {
+                                        if (!caseId || !vn.id) return;
+                                        setDeletingAddendumId(a.id);
+                                        try {
+                                          const res = await fetch(`/api/cases/${caseId}/voice/${vn.id}/addenda/${a.id}`, { method: 'DELETE', credentials: 'include' });
+                                          if (!res.ok) {
+                                            const d = await res.json().catch(() => ({}));
+                                            throw new Error(d?.error || 'Failed');
+                                          }
+                                          toast.success('Follow-up removed');
+                                          const refetch = await fetch(`/api/cases/${caseId}/voice/${vn.id}`, { credentials: 'include' });
+                                          if (refetch.ok) {
+                                            const data = await refetch.json();
+                                            setExpandedVoiceDetail({
+                                              url: data.voiceNote?.url ?? null,
+                                              transcript: data.voiceNote?.transcript ?? null,
+                                              addenda: data.addenda ?? [],
+                                            });
+                                          }
+                                          fetchVoiceNotes();
+                                        } catch (e) {
+                                          toast.error(e instanceof Error ? e.message : 'Failed');
+                                        } finally {
+                                          setDeletingAddendumId(null);
+                                        }
+                                      }}
+                                    >
+                                      {deletingAddendumId === a.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="flex flex-wrap gap-2 items-center pt-2">
                               <Input
-                                placeholder="Add more (text)..."
+                                placeholder="e.g. correction, follow-up, or source note"
                                 value={addMoreText}
                                 onChange={(e) => setAddMoreText(e.target.value)}
                                 className="flex-1 min-w-[120px] border-emerald-200 font-mono text-sm"
@@ -1911,6 +2018,15 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                                     }
                                     toast.success('Added');
                                     setAddMoreText('');
+                                    const refetch = await fetch(`/api/cases/${caseId}/voice/${vn.id}`, { credentials: 'include' });
+                                    if (refetch.ok) {
+                                      const data = await refetch.json();
+                                      setExpandedVoiceDetail({
+                                        url: data.voiceNote?.url ?? null,
+                                        transcript: data.voiceNote?.transcript ?? null,
+                                        addenda: data.addenda ?? [],
+                                      });
+                                    }
                                     fetchVoiceNotes();
                                   } catch (e) {
                                     toast.error(e instanceof Error ? e.message : 'Failed');

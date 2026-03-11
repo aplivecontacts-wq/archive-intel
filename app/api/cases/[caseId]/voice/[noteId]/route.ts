@@ -46,3 +46,43 @@ export async function GET(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: { caseId: string; noteId: string } }
+) {
+  try {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const { caseId, noteId } = params ?? {};
+    if (!caseId || !noteId) return NextResponse.json({ error: 'caseId and noteId required' }, { status: 400 });
+
+    const { data: note, error: noteErr } = await (supabaseServer.from('voice_notes') as any)
+      .select('id, storage_path')
+      .eq('id', noteId)
+      .eq('user_id', userId)
+      .eq('case_id', caseId)
+      .maybeSingle();
+    if (noteErr || !note) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+    const { data: addenda } = await (supabaseServer.from('voice_note_addenda') as any)
+      .select('storage_path')
+      .eq('voice_note_id', noteId);
+    const pathsToRemove: string[] = [note.storage_path];
+    for (const a of addenda ?? []) {
+      if (a?.storage_path) pathsToRemove.push(a.storage_path);
+    }
+    await supabaseServer.storage.from(BUCKET).remove(pathsToRemove);
+    const { error: delErr } = await (supabaseServer.from('voice_notes') as any)
+      .delete()
+      .eq('id', noteId)
+      .eq('user_id', userId)
+      .eq('case_id', caseId);
+    if (delErr) return NextResponse.json({ error: delErr.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Delete failed';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
