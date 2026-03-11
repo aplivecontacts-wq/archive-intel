@@ -1923,13 +1923,24 @@ export function ResultsTabs({ queryId, queryStatus, rawInput, caseId }: ResultsT
                                   controls
                                   src={expandedVoiceDetail?.url ?? vn.url ?? undefined}
                                   className="w-full max-w-md"
+                                  playsInline
                                   onError={() => setVoiceAudioError(true)}
                                   onCanPlay={() => setVoiceAudioError(false)}
                                 />
                                 {voiceAudioError && (
-                                  <p className="text-xs text-amber-700 font-mono mt-1">
-                                    Playback failed on this device. Try on desktop or a different browser.
-                                  </p>
+                                  <div className="mt-1 space-y-1">
+                                    <p className="text-xs text-amber-700 font-mono">
+                                      Playback failed on this device. Try opening the file directly below.
+                                    </p>
+                                    <a
+                                      href={expandedVoiceDetail?.url ?? vn.url ?? undefined}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center text-[11px] font-mono text-emerald-700 underline"
+                                    >
+                                      Open audio in new tab
+                                    </a>
+                                  </div>
                                 )}
                               </>
                             )}

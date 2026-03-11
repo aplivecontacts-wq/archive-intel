@@ -26,19 +26,25 @@ export function VoiceMicFloat({ caseId, queryId, onUploaded }: VoiceMicFloatProp
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const recMime =
+        typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported?.('audio/mp4')
+          ? 'audio/mp4'
+          : 'audio/webm';
+      const recorder = new MediaRecorder(stream, recMime ? { mimeType: recMime } : undefined);
       const chunks: Blob[] = [];
       recorder.ondataavailable = (e) => {
         if (e.data.size) chunks.push(e.data);
       };
       recorder.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunks, { type: 'audio/webm' });
+        const mimeType = recMime;
+        const ext = mimeType === 'audio/mp4' ? 'm4a' : 'webm';
+        const blob = new Blob(chunks, { type: mimeType });
         setUploading(true);
         try {
           const form = new FormData();
           form.append('queryId', queryId);
-          form.append('file', blob, 'recording.webm');
+          form.append('file', blob, `recording.${ext}`);
           const res = await fetch(`/api/cases/${caseId}/voice`, {
             method: 'POST',
             body: form,
