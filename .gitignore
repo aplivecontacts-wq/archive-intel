@@ -21,6 +21,7 @@
 
 # debug
 npm-debug.log*
+debug-*.log
 .cursor/
 
 # bolt

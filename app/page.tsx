@@ -1,7 +1,6 @@
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
 import { AccessSystemButton } from '@/components/access-system-button';
-import { Terminal, Database, Activity, Zap, Lock, Archive } from 'lucide-react';
+import { LaunchPlatformButton } from '@/components/launch-platform-button';
+import { Terminal, Database, Activity, Lock, Archive } from 'lucide-react';
 
 export default function Home() {
   return (
@@ -45,12 +44,7 @@ export default function Home() {
             </p>
 
             <div className="flex justify-center gap-4 pt-8">
-              <Link href="/app">
-                <Button size="lg" className="bg-emerald-600 hover:bg-emerald-700 text-white px-10 py-6 text-lg font-mono shadow-lg shadow-emerald-500/20">
-                  <Zap className="mr-2 h-5 w-5" />
-                  LAUNCH PLATFORM
-                </Button>
-              </Link>
+              <LaunchPlatformButton />
             </div>
           </div>
 

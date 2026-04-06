@@ -110,7 +110,6 @@ export async function GET(
         timestamp: Date.now(),
       };
       console.log('[brief GET]', payload.data);
-      fetch('http://127.0.0.1:7242/ingest/e0a55016-0dba-46c8-8112-7b93c9c9c645', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '726d5f' }, body: JSON.stringify(payload) }).catch(() => {});
     }
     // #endregion
 

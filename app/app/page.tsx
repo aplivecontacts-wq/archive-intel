@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SidebarCases } from '@/components/sidebar-cases';
 import { Card, CardContent } from '@/components/ui/card';
-import { FolderOpen, Loader2, FolderPlus } from 'lucide-react';
+import { Loader2, FolderPlus } from 'lucide-react';
 
 interface Case {
   id: string;
@@ -23,14 +23,32 @@ export default function AppPage() {
   }, []);
 
   useEffect(() => {
-    if (cases.length > 0 && !loading) {
-      router.push(`/app/cases/${cases[0].id}`);
-    }
+    if (cases.length === 0 || loading) return;
+    router.replace(`/app/cases/${cases[0].id}`);
   }, [cases, loading, router]);
 
+  /** If client navigation stalls, hard-navigate to the case (avoids endless REDIRECTING…). */
+  useEffect(() => {
+    if (cases.length === 0 || loading) return;
+    const id = cases[0].id;
+    const t = window.setTimeout(() => {
+      if (window.location.pathname === '/app') {
+        window.location.assign(`/app/cases/${id}`);
+      }
+    }, 4000);
+    return () => window.clearTimeout(t);
+  }, [cases, loading]);
+
   const fetchCases = async () => {
+    const t0 = Date.now();
+    const controller = new AbortController();
+    const timeoutMs = 25000;
+    const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch('/api/cases');
+      const response = await fetch('/api/cases', {
+        credentials: 'include',
+        signal: controller.signal,
+      });
       const text = await response.text();
       let data: { cases?: Case[] } = {};
       try {
@@ -44,6 +62,7 @@ export default function AppPage() {
     } catch (error) {
       console.error('Failed to fetch cases:', error);
     } finally {
+      window.clearTimeout(timeoutId);
       setLoading(false);
     }
   };

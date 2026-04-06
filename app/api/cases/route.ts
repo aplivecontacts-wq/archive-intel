@@ -2,27 +2,55 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { supabaseServer } from '@/lib/supabase-server';
 
+export const dynamic = 'force-dynamic';
+
+function devLogCases(payload: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== 'development') return;
+  // eslint-disable-next-line no-console -- dev-only diagnostics
+  console.debug('[api/cases]', payload);
+}
+
 export async function GET() {
+  const t0 = Date.now();
+  devLogCases({ message: 'GET start', data: { t0 } });
   try {
+    const tAuth0 = Date.now();
     const { userId } = await auth();
+    const authMs = Date.now() - tAuth0;
+    devLogCases({ message: 'GET after auth', data: { authMs, hasUserId: Boolean(userId) } });
     if (!userId) {
+      devLogCases({ message: 'GET no userId', data: { authMs, totalMs: Date.now() - t0 } });
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const tDb0 = Date.now();
     const { data: rawData, error } = await (supabaseServer
       .from('cases') as any)
       .select('*')
       .order('created_at', { ascending: false });
+    const dbMs = Date.now() - tDb0;
 
     if (error) {
+      devLogCases({
+        message: 'GET supabase error',
+        data: { authMs, dbMs, error: error.message, totalMs: Date.now() - t0 },
+      });
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     const cases = (rawData || []).filter(
       (row: { user_id?: string | null }) => row.user_id == null || row.user_id === userId
     );
+    devLogCases({
+      message: 'GET ok',
+      data: { authMs, dbMs, caseCount: cases.length, totalMs: Date.now() - t0 },
+    });
     return NextResponse.json({ cases });
   } catch (error) {
+    devLogCases({
+      message: 'GET exception',
+      data: { err: error instanceof Error ? error.message : 'unknown', totalMs: Date.now() - t0 },
+    });
     return NextResponse.json(
       { error: 'Failed to fetch cases' },
       { status: 500 }

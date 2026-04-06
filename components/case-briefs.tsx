@@ -244,7 +244,6 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
             timestamp: Date.now(),
           };
           console.log('[brief view client]', payload.data);
-          fetch('http://127.0.0.1:7242/ingest/e0a55016-0dba-46c8-8112-7b93c9c9c645', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '726d5f' }, body: JSON.stringify(payload) }).catch(() => {});
         }
         // #endregion
         setViewBrief({ ...raw, brief_json: normalized });
@@ -659,7 +658,7 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
                                       }
                                       aria-label={`I've confirmed timeline item ${i + 1}`}
                                     />
-                                    <span>I've confirmed</span>
+                                    <span>I&apos;ve confirmed</span>
                                   </label>
                                 </div>
                                 {refs.length > 0 && (
@@ -1364,7 +1363,7 @@ export function CaseBriefs({ caseId, caseObjective, onTasksImported, entities, o
                   <p className="text-gray-600 text-xs font-medium mb-1 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" aria-hidden />What to add</p>
                   <p className="text-gray-700 text-xs mb-2">Events with time window, event description, confidence (high/medium/low), basis (public/note/confidential/unverified), and source refs. Add evidence; the AI turns it into timeline entries.</p>
                   <p className="text-gray-600 text-xs font-medium mb-1 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0" aria-hidden />How to use it</p>
-                  <p className="text-gray-700 text-xs mb-2">Check that key events are there and confidence matches the evidence; use "I've confirmed" when you have verified an event (audit only; does not change the score; shown in PDF).</p>
+                  <p className="text-gray-700 text-xs mb-2">Check that key events are there and confidence matches the evidence; use &quot;I&apos;ve confirmed&quot; when you have verified an event (audit only; does not change the score; shown in PDF).</p>
                   <p className="text-gray-600 text-xs font-medium mb-1 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" aria-hidden />Why it matters</p>
                   <p className="text-gray-700 text-xs">Chronology is the backbone; weak or unsupported events get flagged in coherence alerts.</p>
                 </CardContent>
